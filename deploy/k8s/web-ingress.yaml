@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: damp-web }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: damp-web } }
+  template:
+    metadata: { labels: { app: damp-web } }
+    spec:
+      containers:
+        - name: web
+          image: gcr.io/YOUR_PROJECT/damp-web:latest
+          ports: [{ containerPort: 80 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: damp-web }
+spec:
+  type: ClusterIP
+  selector: { app: damp-web }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: damp-ingress
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: damp-api, port: { number: 80 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: damp-web, port: { number: 80 } } }

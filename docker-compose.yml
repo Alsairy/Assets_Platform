@@ -1,0 +1,30 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: appdb
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+
+  api:
+    build: { context: ./backend, dockerfile: Dockerfile }
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: Host=db;Port=5432;Database=appdb;Username=app;Password=app
+      FLOWABLE__BASE_URL: http://flowable:8080/flowable-rest
+      FLOWABLE__USER: flowable
+      FLOWABLE__PASS: flowable
+      OCR__PROVIDER: Fake
+    depends_on: [db]
+    ports: ["8080:8080"]
+
+  web:
+    build: { context: ./frontend/web, dockerfile: Dockerfile }
+    ports: ["5173:80"]
+    depends_on: [api]
+
+volumes: { pgdata: {} }
