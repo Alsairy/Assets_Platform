@@ -4,6 +4,10 @@ using App.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Serilog;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Security.Claims;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,8 +30,78 @@ else
 
 builder.Services.AddSingleton<IWorkflowEngine, FlowableWorkflowEngineAdapter>();
 
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = builder.Configuration["OIDC:Authority"];
+        options.Audience  = builder.Configuration["OIDC:Audience"];
+        options.RequireHttpsMetadata = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = false,
+            NameClaimType = "preferred_username",
+            RoleClaimType = ClaimTypes.Role
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = ctx =>
+            {
+                var identity = ctx.Principal!.Identity as ClaimsIdentity;
+                var realmAccess = ctx.Principal!.FindFirst("realm_access")?.Value;
+                if (!string.IsNullOrWhiteSpace(realmAccess))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(realmAccess);
+                        if (doc.RootElement.TryGetProperty("roles", out var roles) && roles.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var r in roles.EnumerateArray())
+                            {
+                                var role = r.GetString();
+                                if (!string.IsNullOrWhiteSpace(role))
+                                    identity!.AddClaim(new Claim(ClaimTypes.Role, role));
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                return Task.CompletedTask;
+            }
+        };
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("RequireAuthenticated", policy => policy.RequireAuthenticatedUser());
+});
+
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c => c.SwaggerDoc("v1", new OpenApiInfo { Title = "DAMP API", Version = "v1" }));
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "DAMP API", Version = "v1" });
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header using the Bearer scheme. Example: 'Bearer {token}'",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Id = "Bearer", Type = ReferenceType.SecurityScheme }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
@@ -35,12 +109,6 @@ var app = builder.Build();
 app.UseCors();
 app.UseSwagger();
 app.UseSwaggerUI();
-
-// fake auth: read role + region from headers; replace with JwtBearer later
-(string role, string region, string city) GetContext(HttpRequest req) =>
-    (req.Headers.TryGetValue("X-User-Role", out var r) ? r.ToString() : "Admin",
-     req.Headers.TryGetValue("X-Region", out var rg) ? rg.ToString() : "",
-     req.Headers.TryGetValue("X-City", out var cg) ? cg.ToString() : "");
 
 using (var scope = app.Services.CreateScope())
 {
@@ -52,11 +120,16 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Health
-app.MapGet("/health", () => Results.Ok(new { status = "ok", ts = DateTimeOffset.UtcNow }));
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapGet("/health", () => Results.Ok(new { status = "ok", ts = DateTimeOffset.UtcNow }))
+   .AllowAnonymous();
+
+var api = app.MapGroup("/api").RequireAuthorization("RequireAuthenticated");
 
 // ---- Admin: Asset Types & Fields ----
-app.MapPost("/api/asset-types", async (AppDbContext db, AssetType input) =>
+api.MapPost("/asset-types", async (AppDbContext db, AssetType input) =>
 {
     input.Id = 0;
     db.AssetTypes.Add(input);
@@ -64,10 +137,10 @@ app.MapPost("/api/asset-types", async (AppDbContext db, AssetType input) =>
     return Results.Created($"/api/asset-types/{input.Id}", input);
 });
 
-app.MapGet("/api/asset-types", async (AppDbContext db) =>
+api.MapGet("/asset-types", async (AppDbContext db) =>
     Results.Ok(await db.AssetTypes.Include(t => t.Fields).OrderByDescending(x => x.Id).ToListAsync()));
 
-app.MapPost("/api/fields", async (AppDbContext db, FieldDefinition input) =>
+api.MapPost("/fields", async (AppDbContext db, FieldDefinition input) =>
 {
     input.Id = 0;
     db.FieldDefinitions.Add(input);
@@ -75,16 +148,16 @@ app.MapPost("/api/fields", async (AppDbContext db, FieldDefinition input) =>
     return Results.Created($"/api/fields/{input.Id}", input);
 });
 
-app.MapGet("/api/fields/by-type/{assetTypeId:long}", async (AppDbContext db, long assetTypeId, HttpRequest req) =>
+api.MapGet("/fields/by-type/{assetTypeId:long}", async (AppDbContext db, long assetTypeId, ClaimsPrincipal user) =>
 {
-    var (role, _, _) = GetContext(req);
+    var isAdmin = user.IsInRole("Admin");
     var fields = await db.FieldDefinitions.Where(f => f.AssetTypeId == assetTypeId).ToListAsync();
-    if (role != "Admin") fields = fields.Where(f => f.PrivacyLevel != PrivacyLevel.Restricted).ToList();
+    if (!isAdmin) fields = fields.Where(f => f.PrivacyLevel != PrivacyLevel.Restricted).ToList();
     return Results.Ok(fields);
 });
 
 // ---- Field Permissions ----
-app.MapPost("/api/field-permissions", async (AppDbContext db, FieldPermission p) =>
+api.MapPost("/field-permissions", async (AppDbContext db, FieldPermission p) =>
 {
     p.Id = 0;
     db.FieldPermissions.Add(p);
@@ -94,7 +167,7 @@ app.MapPost("/api/field-permissions", async (AppDbContext db, FieldPermission p)
 
 // ---- Assets CRUD ----
 
-app.MapPost("/api/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAssetDto dto) =>
+api.MapPost("/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAssetDto dto) =>
 {
     var t = await db.AssetTypes.Include(t => t.Fields).FirstOrDefaultAsync(t => t.Id == dto.AssetTypeId);
     if (t == null) return Results.BadRequest("AssetType not found");
@@ -122,7 +195,6 @@ app.MapPost("/api/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAss
         await db.SaveChangesAsync();
     }
 
-    // Start registration workflow
     var wfId = await wf.StartProcessAsync("asset_registration", new Dictionary<string,object> {
         ["assetId"] = a.Id, ["assetType"] = t.Name, ["region"] = a.Region, ["city"] = a.City
     });
@@ -134,18 +206,14 @@ app.MapPost("/api/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAss
 });
 
 // list with filters + pagination
-app.MapGet("/api/assets", async (AppDbContext db, HttpRequest req, int page = 1, int pageSize = 20, long? assetTypeId = null, string? q = null, string? region = null, string? city = null, string? status = null) =>
+api.MapGet("/assets", async (AppDbContext db, int page = 1, int pageSize = 20, long? assetTypeId = null, string? q = null, string? region = null, string? city = null, string? status = null) =>
 {
-    var (role, rscope, cscope) = GetContext(req);
     var query = db.Assets.AsQueryable();
     if (assetTypeId.HasValue) query = query.Where(a => a.AssetTypeId == assetTypeId);
     if (!string.IsNullOrWhiteSpace(q)) query = query.Where(a => EF.Functions.ILike(a.Name, $"%{q}%"));
     if (!string.IsNullOrWhiteSpace(region)) query = query.Where(a => a.Region == region);
     if (!string.IsNullOrWhiteSpace(city)) query = query.Where(a => a.City == city);
     if (!string.IsNullOrWhiteSpace(status)) query = query.Where(a => a.Status == status);
-    // scope enforcement
-    if (!string.IsNullOrEmpty(rscope)) query = query.Where(a => a.Region == rscope);
-    if (!string.IsNullOrEmpty(cscope)) query = query.Where(a => a.City == cscope);
 
     var total = await query.CountAsync();
     var items = await query.OrderByDescending(a => a.Id).Skip((page-1)*pageSize).Take(pageSize).Select(a => new {
@@ -155,22 +223,20 @@ app.MapGet("/api/assets", async (AppDbContext db, HttpRequest req, int page = 1,
     return Results.Ok(new { total, items });
 });
 
-app.MapGet("/api/assets/{id:long}", async (AppDbContext db, long id, HttpRequest req) =>
+api.MapGet("/assets/{id:long}", async (AppDbContext db, long id, ClaimsPrincipal user) =>
 {
-    var (role, rscope, cscope) = GetContext(req);
+    var isAdmin = user.IsInRole("Admin");
     var a = await db.Assets.Include(a => a.AssetType)!.ThenInclude(t => t!.Fields)
         .Include(a => a.FieldValues)
         .Include(a => a.Documents)
         .FirstOrDefaultAsync(x => x.Id == id);
     if (a == null) return Results.NotFound();
-    if (!string.IsNullOrEmpty(rscope) && a.Region != rscope) return Results.Forbid();
-    if (!string.IsNullOrEmpty(cscope) && a.City != cscope) return Results.Forbid();
 
     var fields = a.FieldValues.Select(v => new {
         Field = a.AssetType!.Fields.First(f => f.Id == v.FieldDefinitionId),
         v.Value
     })
-    .Where(x => role == "Admin" || x.Field.PrivacyLevel != PrivacyLevel.Restricted)
+    .Where(x => isAdmin || x.Field.PrivacyLevel != PrivacyLevel.Restricted)
     .Select(x => new { x.Field.Name, x.Field.DataType, x.Field.PrivacyLevel, x.Value })
     .ToList();
 
@@ -181,7 +247,7 @@ app.MapGet("/api/assets/{id:long}", async (AppDbContext db, long id, HttpRequest
     });
 });
 
-app.MapPut("/api/assets/{id:long}", async (AppDbContext db, long id, UpdateAssetDto dto) =>
+api.MapPut("/assets/{id:long}", async (AppDbContext db, long id, UpdateAssetDto dto) =>
 {
     var a = await db.Assets.Include(x=>x.AssetType)!.ThenInclude(t=>t!.Fields).FirstOrDefaultAsync(x => x.Id == id);
     if (a == null) return Results.NotFound();
@@ -209,7 +275,7 @@ app.MapPut("/api/assets/{id:long}", async (AppDbContext db, long id, UpdateAsset
 });
 
 // ---- Document upload with versioning + OCR ----
-app.MapPost("/api/assets/{id:long}/documents", async (AppDbContext db, IOcrService ocr, long id, HttpRequest req) =>
+api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService ocr, long id, HttpRequest req) =>
 {
     var a = await db.Assets.Include(x=>x.AssetType)!.ThenInclude(t=>t!.Fields).FirstOrDefaultAsync(x => x.Id == id);
     if (a == null) return Results.NotFound();
@@ -248,7 +314,7 @@ app.MapPost("/api/assets/{id:long}/documents", async (AppDbContext db, IOcrServi
 .Accepts<IFormFile>("multipart/form-data");
 
 // ---- Reports ----
-app.MapGet("/api/reports/portfolio", async (AppDbContext db) =>
+api.MapGet("/reports/portfolio", async (AppDbContext db) =>
 {
     var total = await db.Assets.CountAsync();
     var byRegion = await db.Assets.GroupBy(a => a.Region).Select(g => new { region = g.Key, count = g.Count() }).ToListAsync();
