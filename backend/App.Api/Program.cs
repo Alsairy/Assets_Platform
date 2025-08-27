@@ -116,7 +116,7 @@ using (var scope = app.Services.CreateScope())
     if (app.Environment.IsDevelopment())
     {
         db.Database.Migrate();
-        await App.Infrastructure.Data.AppDbSeeder.SeedAsync(db);
+        await AppDbSeeder.SeedAsync(db);
     }
 }
 

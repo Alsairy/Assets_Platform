@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using System.Linq;
 using System.Net.Http.Headers;
 
 namespace App.Infrastructure.Services;
