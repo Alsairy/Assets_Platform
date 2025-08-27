@@ -45,7 +45,11 @@ app.UseSwaggerUI();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.EnsureCreated();
+    if (app.Environment.IsDevelopment())
+    {
+        db.Database.Migrate();
+        await AppDbSeeder.SeedAsync(db);
+    }
 }
 
 // Health
@@ -89,8 +93,6 @@ app.MapPost("/api/field-permissions", async (AppDbContext db, FieldPermission p)
 });
 
 // ---- Assets CRUD ----
-public record CreateAssetDto(long AssetTypeId, string Name, string Region, string City, double? Latitude, double? Longitude, Dictionary<string,string>? FieldValues);
-public record UpdateAssetDto(string? Name, string? Region, string? City, double? Latitude, double? Longitude, Dictionary<string,string>? FieldValues);
 
 app.MapPost("/api/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAssetDto dto) =>
 {
@@ -218,7 +220,7 @@ app.MapPost("/api/assets/{id:long}/documents", async (AppDbContext db, IOcrServi
     Directory.CreateDirectory(dir);
     var existingVersions = await db.Documents.Where(d => d.AssetId == id && d.FileName == f.FileName).CountAsync();
     var version = existingVersions + 1;
-    var path = Path.Combine(dir, f"{version}_{f.FileName}");
+    var path = Path.Combine(dir, $"{version}_{f.FileName}");
     using (var fs = File.Create(path)) { await f.CopyToAsync(fs); }
 
     var doc = new Document { AssetId = id, FileName = f.FileName, ContentType = f.ContentType, StoragePath = path, Version = version };
@@ -255,3 +257,5 @@ app.MapGet("/api/reports/portfolio", async (AppDbContext db) =>
 });
 
 app.Run();
+public record CreateAssetDto(long AssetTypeId, string Name, string Region, string City, double? Latitude, double? Longitude, Dictionary<string,string>? FieldValues);
+public record UpdateAssetDto(string? Name, string? Region, string? City, double? Latitude, double? Longitude, Dictionary<string,string>? FieldValues);
