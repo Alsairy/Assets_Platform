@@ -1,6 +1,7 @@
 using App.Domain.Entities;
 using App.Infrastructure.Data;
 using App.Infrastructure.Services;
+using App.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Serilog;
@@ -8,6 +9,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
 using System.Text.Json;
+using Google.Cloud.Storage.V1;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +30,8 @@ else if (ocrProvider.Equals("Azure", StringComparison.OrdinalIgnoreCase))
 else
     builder.Services.AddSingleton<IOcrService, FakeOcrService>();
 
+builder.Services.AddSingleton(StorageClient.Create());
+builder.Services.AddSingleton<IBlobStorage, GcsBlobStorage>();
 builder.Services.AddSingleton<IWorkflowEngine, FlowableWorkflowEngineAdapter>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -275,7 +279,7 @@ api.MapPut("/assets/{id:long}", async (AppDbContext db, long id, UpdateAssetDto 
 });
 
 // ---- Document upload with versioning + OCR ----
-api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService ocr, long id, HttpRequest req) =>
+api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService ocr, IBlobStorage storage, IConfiguration cfg, long id, HttpRequest req) =>
 {
     var a = await db.Assets.Include(x=>x.AssetType)!.ThenInclude(t=>t!.Fields).FirstOrDefaultAsync(x => x.Id == id);
     if (a == null) return Results.NotFound();
@@ -289,7 +293,14 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
     var path = Path.Combine(dir, $"{version}_{f.FileName}");
     using (var fs = File.Create(path)) { await f.CopyToAsync(fs); }
 
-    var doc = new Document { AssetId = id, FileName = f.FileName, ContentType = f.ContentType, StoragePath = path, Version = version };
+    var bucket = cfg["GCS:BucketName"] ?? "assets-dev";
+    var objectName = $"documents/{id}/{DateTime.UtcNow:yyyyMMddHHmmss}-{f.FileName}";
+    using (var uploadStream = f.OpenReadStream())
+    {
+        await storage.UploadAsync(bucket, objectName, uploadStream, f.ContentType, req.HttpContext.RequestAborted);
+    }
+
+    var doc = new Document { AssetId = id, FileName = f.FileName, ContentType = f.ContentType, StoragePath = objectName, Version = version };
     db.Documents.Add(doc);
     await db.SaveChangesAsync();
 
