@@ -49,6 +49,13 @@ public class AppDbContext : DbContext
             .WithMany(a => a.Documents)
             .HasForeignKey(d => d.AssetId);
 
+        modelBuilder.Entity<Document>()
+            .HasCheckConstraint("CK_documents_OcrConfidence_0_1",
+                "\"OcrConfidence\" IS NULL OR (\"OcrConfidence\" >= 0 AND \"OcrConfidence\" <= 1)");
+
+        modelBuilder.Entity<Document>()
+            .HasIndex(d => d.AssetId);
+
         modelBuilder.Entity<Role>().HasData(
             new Role { Id = 1, Name = "Admin" },
             new Role { Id = 2, Name = "Officer" },

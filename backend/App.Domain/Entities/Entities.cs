@@ -2,6 +2,8 @@ namespace App.Domain.Entities;
 
 public enum DataType { Text, Number, Date, Dropdown, Attachment, Location }
 public enum PrivacyLevel { Public, Confidential, Restricted }
+public enum OcrStatus { Pending, Succeeded, Failed, LowConfidence }
+
 
 public class AssetType
 {
@@ -62,7 +64,7 @@ public class Document
     public string ContentType { get; set; } = "application/octet-stream";
     public string StoragePath { get; set; } = string.Empty;
     public string? OcrText { get; set; }
-    public string? OcrStatus { get; set; }
+    public OcrStatus? OcrStatus { get; set; }
     public double? OcrConfidence { get; set; }
     public int Version { get; set; } = 1;
     public DateTime UploadedUtc { get; set; } = DateTime.UtcNow;

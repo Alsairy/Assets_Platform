@@ -318,7 +318,7 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
     {
         doc.OcrText = text;
         doc.OcrConfidence = conf;
-        doc.OcrStatus = "COMPLETED";
+        doc.OcrStatus = OcrStatus.Succeeded;
         foreach (var kv in extracted)
         {
             var fd = a.AssetType!.Fields.FirstOrDefault(ff => ff.Name == kv.Key);
@@ -333,7 +333,7 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
     }
     else
     {
-        doc.OcrStatus = "LOW_CONFIDENCE";
+        doc.OcrStatus = OcrStatus.LowConfidence;
         doc.OcrConfidence = conf;
         await db.SaveChangesAsync();
     }
