@@ -1,7 +1,8 @@
+using App.Infrastructure.Storage;
+
 using App.Domain.Entities;
 using App.Infrastructure.Data;
 using App.Infrastructure.Services;
-using App.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Serilog;
