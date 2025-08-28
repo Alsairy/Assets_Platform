@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   db:
     image: postgres:16
@@ -9,6 +8,26 @@ services:
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
 
+  flowable:
+    image: flowable/flowable-rest:6.8.0
+    container_name: assets-flowable
+    environment:
+      FLOWABLE_DATABASE_TYPE: postgres
+      FLOWABLE_DATABASE_HOST: db
+      FLOWABLE_DATABASE_PORT: 5432
+      FLOWABLE_DATABASE_NAME: appdb
+      FLOWABLE_DATABASE_USERNAME: app
+      FLOWABLE_DATABASE_PASSWORD: app
+      FLOWABLE_DATABASE_SCHEMA_UPDATE: true
+    ports:
+      - "8082:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/flowable-rest/service/management/engine"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on: [db]
+
   api:
     build: { context: ./backend, dockerfile: Dockerfile }
     environment:
@@ -16,10 +35,10 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Default: Host=db;Port=5432;Database=appdb;Username=app;Password=app
       FLOWABLE__BASE_URL: http://flowable:8080/flowable-rest
-      FLOWABLE__USER: flowable
-      FLOWABLE__PASS: flowable
+      FLOWABLE__USER: admin
+      FLOWABLE__PASS: test
       OCR__PROVIDER: Fake
-    depends_on: [db]
+    depends_on: [db, flowable]
     ports: ["8080:8080"]
 
   web:
