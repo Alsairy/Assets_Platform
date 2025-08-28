@@ -17,10 +17,10 @@ public class FlowableWorkflowEngineAdapter : IWorkflowEngine
     private readonly string _base;
     public FlowableWorkflowEngineAdapter(IConfiguration cfg)
     {
-        _base = cfg["FLOWABLE__BASE_URL"] ?? "http://localhost:8080/flowable-rest";
+        _base = cfg["FLOWABLE__BASE_URL"] ?? cfg["Flowable:BaseUrl"] ?? "http://localhost:8080/flowable-rest";
         _http = new HttpClient();
-        var u = cfg["FLOWABLE__USER"] ?? "flowable";
-        var p = cfg["FLOWABLE__PASS"] ?? "flowable";
+        var u = cfg["FLOWABLE__USER"] ?? cfg["Flowable:Username"] ?? "flowable";
+        var p = cfg["FLOWABLE__PASS"] ?? cfg["Flowable:Password"] ?? "flowable";
         var byteArray = System.Text.Encoding.ASCII.GetBytes($"{u}:{p}");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(byteArray));
     }

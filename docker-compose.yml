@@ -21,6 +21,8 @@ services:
       FLOWABLE_DATABASE_USERNAME: app
       FLOWABLE_DATABASE_PASSWORD: app
       FLOWABLE_DATABASE_SCHEMA_UPDATE: true
+      FLOWABLE_REST_APP_ADMIN_USER: admin
+      FLOWABLE_REST_APP_ADMIN_PASSWORD: test
     ports:
       - "8082:8080"
     healthcheck:
@@ -52,7 +54,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Default: Host=db;Port=5432;Database=appdb;Username=app;Password=app
       FLOWABLE__BASE_URL: http://flowable:8080/flowable-rest
-      FLOWABLE__USER: admin
+      FLOWABLE__USER: rest-admin
       FLOWABLE__PASS: test
       OCR__PROVIDER: Fake
     depends_on: [db, flowable, keycloak]
