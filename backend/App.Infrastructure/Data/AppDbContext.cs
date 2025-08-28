@@ -48,11 +48,23 @@ public class AppDbContext : DbContext
             .HasOne(d => d.Asset)
             .WithMany(a => a.Documents)
             .HasForeignKey(d => d.AssetId);
+        modelBuilder.Entity<Document>()
+            .Property(d => d.OcrStatus)
+            .HasConversion<string>();
+
 
         modelBuilder.Entity<Role>().HasData(
             new Role { Id = 1, Name = "Admin" },
             new Role { Id = 2, Name = "Officer" },
             new Role { Id = 3, Name = "Reviewer" }
         );
+        modelBuilder.Entity<Document>()
+            .ToTable(tb => tb.HasCheckConstraint(
+                "CK_documents_OcrConfidence_0_1",
+                "\"OcrConfidence\" IS NULL OR (\"OcrConfidence\" >= 0 AND \"OcrConfidence\" <= 1)"
+            ));
+        modelBuilder.Entity<Document>()
+            .HasIndex(d => d.AssetId);
+
     }
 }

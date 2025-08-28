@@ -13,11 +13,20 @@ public class LocalBlobStorage : IBlobStorage
         Directory.CreateDirectory(_root);
     }
 
+    private static string SafeJoin(string root, string relative)
+    {
+        var combined = Path.GetFullPath(Path.Combine(root, relative.Replace('\\','/').TrimStart('/')));
+        var rootFull = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
+        if (!combined.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Invalid path.");
+        return combined;
+    }
+
     public async Task<string> UploadAsync(string bucket, string objectName, Stream content, string contentType, CancellationToken ct = default)
     {
-        var dir = Path.Combine(_root, bucket);
+        var dir = SafeJoin(_root, bucket);
         Directory.CreateDirectory(dir);
-        var fullPath = Path.Combine(dir, objectName.Replace("..", "").Replace("\\", "/").TrimStart('/'));
+        var fullPath = SafeJoin(dir, objectName);
         var fullDir = Path.GetDirectoryName(fullPath)!;
         Directory.CreateDirectory(fullDir);
         using (var fs = File.Create(fullPath))
@@ -29,13 +38,13 @@ public class LocalBlobStorage : IBlobStorage
 
     public Task<Stream> DownloadAsync(string bucket, string objectName, CancellationToken ct = default)
     {
-        var fullPath = Path.Combine(_root, bucket, objectName.Replace("..", "").Replace("\\", "/").TrimStart('/'));
+        var fullPath = SafeJoin(SafeJoin(_root, bucket), objectName);
         Stream s = File.OpenRead(fullPath);
         return Task.FromResult(s);
     }
 
     public string GetPublicUrl(string bucket, string objectName)
     {
-        return Path.Combine(_root, bucket, objectName.Replace("..", "").Replace("\\", "/").TrimStart('/'));
+        return SafeJoin(SafeJoin(_root, bucket), objectName);
     }
 }

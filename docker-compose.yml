@@ -53,11 +53,17 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Default: Host=db;Port=5432;Database=appdb;Username=app;Password=app
-      FLOWABLE__BASE_URL: http://flowable:8080/flowable-rest
-      FLOWABLE__USER: rest-admin
-      FLOWABLE__PASS: test
+      FLOWABLE__BASEURL: http://flowable:8080/flowable-rest
+      FLOWABLE__USERNAME: admin
+      FLOWABLE__PASSWORD: test
       OCR__PROVIDER: Fake
-    depends_on: [db, flowable, keycloak]
+    depends_on:
+      db:
+        condition: service_started
+      flowable:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
     ports: ["8080:8080"]
 
   web:
