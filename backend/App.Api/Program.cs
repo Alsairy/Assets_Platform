@@ -341,6 +341,25 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
 })
 .Accepts<IFormFile>("multipart/form-data");
 
+api.MapGet("/workflows/asset/{assetId:long}", async (AppDbContext db, long assetId) =>
+{
+    var inst = await db.Set<WorkflowInstance>()
+        .Where(w => w.AssetId == assetId)
+        .Select(w => new
+        {
+            w.Id,
+            w.AssetId,
+            w.ProcessDefinitionKey,
+            w.ProcessInstanceId,
+            w.Status,
+            w.StartedAt,
+            w.CompletedAt
+        })
+        .FirstOrDefaultAsync();
+
+    return inst is null ? Results.NotFound() : Results.Ok(inst);
+}).RequireAuthorization("RequireAuthenticated");
+
 // ---- Reports ----
 api.MapGet("/reports/portfolio", async (AppDbContext db) =>
 {
