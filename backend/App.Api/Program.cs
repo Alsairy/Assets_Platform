@@ -318,7 +318,7 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
     {
         doc.OcrText = text;
         doc.OcrConfidence = conf;
-        doc.OcrStatus = "COMPLETED";
+        doc.OcrStatus = OcrStatus.Succeeded;
         foreach (var kv in extracted)
         {
             var fd = a.AssetType!.Fields.FirstOrDefault(ff => ff.Name == kv.Key);
@@ -333,13 +333,32 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
     }
     else
     {
-        doc.OcrStatus = "LOW_CONFIDENCE";
+        doc.OcrStatus = OcrStatus.LowConfidence;
         doc.OcrConfidence = conf;
         await db.SaveChangesAsync();
     }
     return Results.Created($"/api/assets/{id}/documents/{doc.Id}", new { doc.Id, doc.FileName, doc.Version, doc.UploadedUtc });
 })
 .Accepts<IFormFile>("multipart/form-data");
+
+api.MapGet("/workflows/asset/{assetId:long}", async (AppDbContext db, long assetId) =>
+{
+    var inst = await db.Set<WorkflowInstance>()
+        .Where(w => w.AssetId == assetId)
+        .Select(w => new
+        {
+            w.Id,
+            w.AssetId,
+            w.ProcessDefinitionKey,
+            w.ProcessInstanceId,
+            w.Status,
+            w.StartedAt,
+            w.CompletedAt
+        })
+        .FirstOrDefaultAsync();
+
+    return inst is null ? Results.NotFound() : Results.Ok(inst);
+}).RequireAuthorization("RequireAuthenticated");
 
 // ---- Reports ----
 api.MapGet("/reports/portfolio", async (AppDbContext db) =>
