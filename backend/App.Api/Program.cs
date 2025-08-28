@@ -24,16 +24,37 @@ builder.Services.AddDbContext<AppDbContext>(opt => opt.UseNpgsql(conn));
 
 // Services (choose OCR provider by env)
 var ocrProvider = builder.Configuration["OCR:Provider"] ?? builder.Configuration["OCR__PROVIDER"] ?? "Fake";
-builder.Services.AddSingleton(ImageAnnotatorClient.Create());
 if (ocrProvider.Equals("Google", StringComparison.OrdinalIgnoreCase))
-    builder.Services.AddSingleton<IOcrService, GoogleVisionOcrService>();
+{
+    try
+    {
+        builder.Services.AddSingleton(ImageAnnotatorClient.Create());
+        builder.Services.AddSingleton<IOcrService, GoogleVisionOcrService>();
+    }
+    catch
+    {
+        builder.Services.AddSingleton<IOcrService, FakeOcrService>();
+    }
+}
 else if (ocrProvider.Equals("Azure", StringComparison.OrdinalIgnoreCase))
+{
     builder.Services.AddSingleton<IOcrService, AzureOcrService>();
+}
 else
+{
     builder.Services.AddSingleton<IOcrService, FakeOcrService>();
+}
 
-builder.Services.AddSingleton(StorageClient.Create());
-builder.Services.AddSingleton<IBlobStorage, GcsBlobStorage>();
+var hasGcpCreds = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS"));
+if (hasGcpCreds)
+{
+    builder.Services.AddSingleton(StorageClient.Create());
+    builder.Services.AddSingleton<IBlobStorage, GcsBlobStorage>();
+}
+else
+{
+    builder.Services.AddSingleton<IBlobStorage, LocalBlobStorage>();
+}
 builder.Services.AddSingleton<IWorkflowEngine, FlowableWorkflowEngineAdapter>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -126,6 +147,19 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+if (app.Environment.IsDevelopment() &&
+    builder.Configuration.GetValue<bool>("Auth:DevBypass"))
+{
+    app.Use(async (ctx, next) =>
+    {
+        var identity = new System.Security.Claims.ClaimsIdentity(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme);
+        identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, builder.Configuration["Auth:DevUser"] ?? "dev.user"));
+        identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, builder.Configuration["Auth:DevRole"] ?? "Admin"));
+        ctx.User = new System.Security.Claims.ClaimsPrincipal(identity);
+        await next();
+    });
+}
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -215,7 +249,7 @@ api.MapPost("/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAssetDt
     });
     await db.SaveChangesAsync();
 
-    return Results.Created($"/api/assets/{a.Id}", a);
+    return Results.Created($"/api/assets/{a.Id}", new { a.Id, a.Name, a.Region, a.City, a.Status, a.AssetTypeId, a.WorkflowInstanceId });
 });
 
 // list with filters + pagination
@@ -317,8 +351,6 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
     if (ok)
     {
         doc.OcrText = text;
-        doc.OcrConfidence = conf;
-        doc.OcrStatus = OcrStatus.Succeeded;
         foreach (var kv in extracted)
         {
             var fd = a.AssetType!.Fields.FirstOrDefault(ff => ff.Name == kv.Key);
@@ -329,11 +361,27 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
                 else db.AssetFieldValues.Add(new AssetFieldValue { AssetId = a.Id, FieldDefinitionId = fd.Id, Value = kv.Value });
             }
         }
+        var threshold = builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.8;
+        if (!conf.HasValue)
+        {
+            doc.OcrStatus = OcrStatus.Succeeded;
+            doc.OcrConfidence = null;
+        }
+        else if (conf.Value < threshold)
+        {
+            doc.OcrStatus = OcrStatus.LowConfidence;
+            doc.OcrConfidence = conf;
+        }
+        else
+        {
+            doc.OcrStatus = OcrStatus.Succeeded;
+            doc.OcrConfidence = conf;
+        }
         await db.SaveChangesAsync();
     }
     else
     {
-        doc.OcrStatus = OcrStatus.LowConfidence;
+        doc.OcrStatus = conf.HasValue ? OcrStatus.LowConfidence : OcrStatus.Failed;
         doc.OcrConfidence = conf;
         await db.SaveChangesAsync();
     }
