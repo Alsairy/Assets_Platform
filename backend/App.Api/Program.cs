@@ -1,7 +1,8 @@
+using App.Infrastructure.Storage;
+
 using App.Domain.Entities;
 using App.Infrastructure.Data;
 using App.Infrastructure.Services;
-using App.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Serilog;
@@ -364,24 +365,24 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
         var threshold = builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.8;
         if (!conf.HasValue)
         {
-            doc.OcrStatus = "Succeeded";
+            doc.OcrStatus = OcrStatus.Succeeded;
             doc.OcrConfidence = null;
         }
         else if (conf.Value < threshold)
         {
-            doc.OcrStatus = "LowConfidence";
+            doc.OcrStatus = OcrStatus.LowConfidence;
             doc.OcrConfidence = conf;
         }
         else
         {
-            doc.OcrStatus = "Succeeded";
+            doc.OcrStatus = OcrStatus.Succeeded;
             doc.OcrConfidence = conf;
         }
         await db.SaveChangesAsync();
     }
     else
     {
-        doc.OcrStatus = conf.HasValue ? "LowConfidence" : "Failed";
+        doc.OcrStatus = conf.HasValue ? OcrStatus.LowConfidence : OcrStatus.Failed;
         doc.OcrConfidence = conf;
         await db.SaveChangesAsync();
     }

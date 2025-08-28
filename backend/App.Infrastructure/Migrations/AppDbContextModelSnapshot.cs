@@ -193,10 +193,7 @@ namespace App.Infrastructure.Migrations
 
                     b.HasIndex("AssetId");
 
-                    b.ToTable("documents", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_documents_OcrConfidence_0_1", "\"OcrConfidence\" IS NULL OR (\"OcrConfidence\" >= 0 AND \"OcrConfidence\" <= 1)");
-                        });
+                    b.ToTable("documents", (string)null);
                 });
 
             modelBuilder.Entity("App.Domain.Entities.FieldDefinition", b =>

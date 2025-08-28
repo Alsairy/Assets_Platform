@@ -1,6 +1,9 @@
 using Microsoft.Extensions.Configuration;
 using System.Linq;
 using System.Net.Http.Headers;
+using System.Net;
+using System.Text;
+using System.Text.RegularExpressions;
 using Polly;
 using Google.Cloud.Vision.V1;
 
@@ -39,10 +42,10 @@ public class FlowableWorkflowEngineAdapter : IWorkflowEngine
         var retry = Policy<HttpResponseMessage>
             .Handle<HttpRequestException>()
             .Or<TaskCanceledException>()
-            .OrResult(r => (int)r.StatusCode == 429 || (int)r.StatusCode >= 500 || r.StatusCode == System.Net.HttpStatusCode.RequestTimeout)
+            .OrResult(r => (int)r.StatusCode == 429 || (int)r.StatusCode >= 500 || r.StatusCode == HttpStatusCode.RequestTimeout)
             .WaitAndRetryAsync(3, i => TimeSpan.FromSeconds(Math.Pow(2, i)) + TimeSpan.FromMilliseconds(rnd.Next(0, 250)));
 
-        var res = await retry.ExecuteAsync(() => _http.PostAsync(url, new StringContent(json, System.Text.Encoding.UTF8, "application/json")));
+        var res = await retry.ExecuteAsync(() => _http.PostAsync(url, new StringContent(json, Encoding.UTF8, "application/json")));
         if (!res.IsSuccessStatusCode)
         {
             var body = await res.Content.ReadAsStringAsync();
@@ -77,6 +80,9 @@ public class GoogleVisionOcrService : IOcrService
     public async Task<(bool success, string? text, Dictionary<string,string> extracted, double? confidence)> ProcessAsync(
         string bucket, string objectName, string contentType, CancellationToken ct = default)
     {
+        if (string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+            return (false, null, new(), null);
+
         var img = Image.FromUri($"gs://{bucket}/{objectName}");
         var req = new AnnotateImageRequest {
             Image = img,
@@ -85,6 +91,9 @@ public class GoogleVisionOcrService : IOcrService
         };
 
         var resp = await _vision.AnnotateAsync(req, ct);
+        if (resp?.Error is not null && resp.Error.Code != 0)
+            return (false, null, new(), null);
+
         var anno = resp.FullTextAnnotation;
         if (anno is null || string.IsNullOrWhiteSpace(anno.Text))
             return (false, null, new(), null);
@@ -100,13 +109,43 @@ public class GoogleVisionOcrService : IOcrService
         return (ok, anno.Text, extracted, conf);
     }
 
+    private static readonly Regex DocRegex = new(@"\bDOC[-\s]*([0-9]{3,})\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex DateRegex = new(@"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static string NormalizeDigits(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+        var sb = new StringBuilder(s.Length);
+        foreach (var ch in s)
+        {
+            sb.Append(ch switch
+            {
+                '\u0660' => '0', '\u0661' => '1', '\u0662' => '2', '\u0663' => '3', '\u0664' => '4',
+                '\u0665' => '5', '\u0666' => '6', '\u0667' => '7', '\u0668' => '8', '\u0669' => '9',
+                _ => ch
+            });
+        }
+        return sb.ToString();
+    }
+
     private static Dictionary<string,string> Extract(string text)
     {
         var map = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
-        var doc = System.Text.RegularExpressions.Regex.Match(text, @"\bDOC[-\s]*([0-9]{3,})\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var norm = NormalizeDigits(text);
+
+        var doc = DocRegex.Match(norm);
         if (doc.Success) map["OwnershipDocumentNumber"] = $"DOC-{doc.Groups[1].Value}";
-        var date = System.Text.RegularExpressions.Regex.Match(text, @"\b(20\d{2}[-/]\d{1,2}[-/]\d{1,2})\b");
-        if (date.Success) map["DocumentDate"] = date.Groups[1].Value;
+
+        var date = DateRegex.Match(norm);
+        if (date.Success)
+        {
+            var y = date.Groups[1].Value;
+            var m = date.Groups[2].Value.PadLeft(2, '0');
+            var d = date.Groups[3].Value.PadLeft(2, '0');
+            map["DocumentDate"] = $"{y}-{m}-{d}";
+        }
         return map;
     }
 }
@@ -116,7 +155,8 @@ public class AzureOcrService : IOcrService
     public Task<(bool success, string? text, Dictionary<string,string> extracted, double? confidence)> ProcessAsync(
         string bucket, string objectName, string contentType, CancellationToken ct = default)
     {
-        return Task.FromResult((false, (string?)null, new Dictionary<string,string>(), (double?)null));
+        return Task.FromResult<(bool success, string? text, Dictionary<string,string> extracted, double? confidence)>(
+            (false, (string?)null, new Dictionary<string,string>(), (double?)null));
     }
 }
 
@@ -134,6 +174,6 @@ public class FakeOcrService : IOcrService
             var digits = new string(name.Substring(idx+4).TakeWhile(char.IsDigit).ToArray());
             if (!string.IsNullOrWhiteSpace(digits)) result["OwnershipDocumentNumber"] = $"DOC-{digits}";
         }
-        return Task.FromResult((true, text, result, (double?)null));
+        return Task.FromResult<(bool success, string? text, Dictionary<string,string> extracted, double? confidence)>((true, text, result, (double?)null));
     }
 }
