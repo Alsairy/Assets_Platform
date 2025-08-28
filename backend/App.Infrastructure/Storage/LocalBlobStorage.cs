@@ -39,7 +39,8 @@ public class LocalBlobStorage : IBlobStorage
     public Task<Stream> DownloadAsync(string bucket, string objectName, CancellationToken ct = default)
     {
         var fullPath = SafeJoin(SafeJoin(_root, bucket), objectName);
-        Stream s = File.OpenRead(fullPath);
+        if (!File.Exists(fullPath)) throw new FileNotFoundException(fullPath);
+        Stream s = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         return Task.FromResult(s);
     }
 

@@ -361,26 +361,27 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
                 else db.AssetFieldValues.Add(new AssetFieldValue { AssetId = a.Id, FieldDefinitionId = fd.Id, Value = kv.Value });
             }
         }
-        if (conf.HasValue && conf.Value < (builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.8))
+        var threshold = builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.8;
+        if (!conf.HasValue)
+        {
+            doc.OcrStatus = "Succeeded";
+            doc.OcrConfidence = null;
+        }
+        else if (conf.Value < threshold)
         {
             doc.OcrStatus = "LowConfidence";
             doc.OcrConfidence = conf;
         }
-        else if (conf.HasValue)
+        else
         {
             doc.OcrStatus = "Succeeded";
             doc.OcrConfidence = conf;
-        }
-        else
-        {
-            doc.OcrStatus = "Failed";
-            doc.OcrConfidence = null;
         }
         await db.SaveChangesAsync();
     }
     else
     {
-        doc.OcrStatus = "Failed";
+        doc.OcrStatus = conf.HasValue ? "LowConfidence" : "Failed";
         doc.OcrConfidence = conf;
         await db.SaveChangesAsync();
     }
