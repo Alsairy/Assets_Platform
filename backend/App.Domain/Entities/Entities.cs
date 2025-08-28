@@ -62,8 +62,21 @@ public class Document
     public string ContentType { get; set; } = "application/octet-stream";
     public string StoragePath { get; set; } = string.Empty;
     public string? OcrText { get; set; }
+    public string? OcrStatus { get; set; }
+    public double? OcrConfidence { get; set; }
     public int Version { get; set; } = 1;
     public DateTime UploadedUtc { get; set; } = DateTime.UtcNow;
+}
+
+public class WorkflowInstance
+{
+    public long Id { get; set; }
+    public long AssetId { get; set; }
+    public string ProcessDefinitionKey { get; set; } = "";
+    public string ProcessInstanceId { get; set; } = "";
+    public string Status { get; set; } = "STARTED";
+    public DateTime StartedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? CompletedAt { get; set; }
 }
 
 public class Role

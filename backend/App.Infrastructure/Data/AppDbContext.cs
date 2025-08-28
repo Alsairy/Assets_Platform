@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<Asset> Assets => Set<Asset>();
     public DbSet<AssetFieldValue> AssetFieldValues => Set<AssetFieldValue>();
     public DbSet<Document> Documents => Set<Document>();
+    public DbSet<WorkflowInstance> WorkflowInstances => Set<WorkflowInstance>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<FieldPermission> FieldPermissions => Set<FieldPermission>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
@@ -23,6 +24,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Asset>().ToTable("assets");
         modelBuilder.Entity<AssetFieldValue>().ToTable("asset_field_values");
         modelBuilder.Entity<Document>().ToTable("documents");
+        modelBuilder.Entity<WorkflowInstance>().ToTable("workflow_instances");
         modelBuilder.Entity<Role>().ToTable("roles");
         modelBuilder.Entity<FieldPermission>().ToTable("field_permissions");
         modelBuilder.Entity<AuditLog>().ToTable("audit_logs");

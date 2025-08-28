@@ -10,6 +10,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
 using System.Text.Json;
 using Google.Cloud.Storage.V1;
+using Google.Cloud.Vision.V1;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,7 +23,8 @@ var conn = builder.Configuration.GetConnectionString("Default") ?? builder.Confi
 builder.Services.AddDbContext<AppDbContext>(opt => opt.UseNpgsql(conn));
 
 // Services (choose OCR provider by env)
-var ocrProvider = builder.Configuration["OCR__PROVIDER"] ?? "Fake";
+var ocrProvider = builder.Configuration["OCR:Provider"] ?? builder.Configuration["OCR__PROVIDER"] ?? "Fake";
+builder.Services.AddSingleton(ImageAnnotatorClient.Create());
 if (ocrProvider.Equals("Google", StringComparison.OrdinalIgnoreCase))
     builder.Services.AddSingleton<IOcrService, GoogleVisionOcrService>();
 else if (ocrProvider.Equals("Azure", StringComparison.OrdinalIgnoreCase))
@@ -204,6 +206,13 @@ api.MapPost("/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAssetDt
     });
     a.WorkflowInstanceId = wfId;
     a.Status = "InWorkflow";
+    db.WorkflowInstances.Add(new WorkflowInstance {
+        AssetId = a.Id,
+        ProcessDefinitionKey = "asset_registration",
+        ProcessInstanceId = wfId,
+        Status = "STARTED",
+        StartedAt = DateTime.UtcNow
+    });
     await db.SaveChangesAsync();
 
     return Results.Created($"/api/assets/{a.Id}", a);
@@ -304,10 +313,12 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
     db.Documents.Add(doc);
     await db.SaveChangesAsync();
 
-    var (ok, text, extracted) = await ocr.ProcessAsync(path, f.ContentType);
+    var (ok, text, extracted, conf) = await ocr.ProcessAsync(bucket!, objectName, f.ContentType, req.HttpContext.RequestAborted);
     if (ok)
     {
         doc.OcrText = text;
+        doc.OcrConfidence = conf;
+        doc.OcrStatus = "COMPLETED";
         foreach (var kv in extracted)
         {
             var fd = a.AssetType!.Fields.FirstOrDefault(ff => ff.Name == kv.Key);
@@ -320,9 +331,34 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
         }
         await db.SaveChangesAsync();
     }
+    else
+    {
+        doc.OcrStatus = "LOW_CONFIDENCE";
+        doc.OcrConfidence = conf;
+        await db.SaveChangesAsync();
+    }
     return Results.Created($"/api/assets/{id}/documents/{doc.Id}", new { doc.Id, doc.FileName, doc.Version, doc.UploadedUtc });
 })
 .Accepts<IFormFile>("multipart/form-data");
+
+api.MapGet("/workflows/asset/{assetId:long}", async (AppDbContext db, long assetId) =>
+{
+    var inst = await db.Set<WorkflowInstance>()
+        .Where(w => w.AssetId == assetId)
+        .Select(w => new
+        {
+            w.Id,
+            w.AssetId,
+            w.ProcessDefinitionKey,
+            w.ProcessInstanceId,
+            w.Status,
+            w.StartedAt,
+            w.CompletedAt
+        })
+        .FirstOrDefaultAsync();
+
+    return inst is null ? Results.NotFound() : Results.Ok(inst);
+}).RequireAuthorization("RequireAuthenticated");
 
 // ---- Reports ----
 api.MapGet("/reports/portfolio", async (AppDbContext db) =>
