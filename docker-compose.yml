@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   db:
     image: postgres:16
@@ -28,6 +30,21 @@ services:
       retries: 5
     depends_on: [db]
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on: [db]
+
   api:
     build: { context: ./backend, dockerfile: Dockerfile }
     environment:
@@ -38,7 +55,7 @@ services:
       FLOWABLE__USER: admin
       FLOWABLE__PASS: test
       OCR__PROVIDER: Fake
-    depends_on: [db, flowable]
+    depends_on: [db, flowable, keycloak]
     ports: ["8080:8080"]
 
   web:
