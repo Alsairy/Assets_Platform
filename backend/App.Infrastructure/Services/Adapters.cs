@@ -26,17 +26,21 @@ public class FlowableWorkflowEngineAdapter : IWorkflowEngine
     }
     public async Task<string> StartProcessAsync(string processKey, IDictionary<string, object> variables)
     {
-        var url = $"{_base}/service/runtime/process-instances";
+        var url = "/service/runtime/process-instances";
+        var businessKey = variables.TryGetValue("assetId", out var idObj) ? idObj?.ToString() : Guid.NewGuid().ToString("N");
         var payload = new {
             processDefinitionKey = processKey,
+            businessKey,
             variables = variables.Select(kv => new { name = kv.Key, value = kv.Value })
         };
         var json = System.Text.Json.JsonSerializer.Serialize(payload);
 
-        var retry = Policy
+        var rnd = new Random();
+        var retry = Policy<HttpResponseMessage>
             .Handle<HttpRequestException>()
-            .OrResult<HttpResponseMessage>(r => !r.IsSuccessStatusCode)
-            .WaitAndRetryAsync(3, i => TimeSpan.FromSeconds(Math.Pow(2, i)));
+            .Or<TaskCanceledException>()
+            .OrResult(r => (int)r.StatusCode == 429 || (int)r.StatusCode >= 500 || r.StatusCode == System.Net.HttpStatusCode.RequestTimeout)
+            .WaitAndRetryAsync(3, i => TimeSpan.FromSeconds(Math.Pow(2, i)) + TimeSpan.FromMilliseconds(rnd.Next(0, 250)));
 
         var res = await retry.ExecuteAsync(() => _http.PostAsync(url, new StringContent(json, System.Text.Encoding.UTF8, "application/json")));
         if (!res.IsSuccessStatusCode)
