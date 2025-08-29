@@ -66,11 +66,10 @@ jobs:
         run: |
           set -e
           docker compose up -d db keycloak flowable
-          echo "Waiting for Keycloak & Flowable health..."
-          # Keycloak health (up to 4 minutes)
+          echo "Waiting for Keycloak to respond..."
           ok=0
           for i in {1..120}; do
-            if docker compose ps keycloak | grep -E "healthy"; then ok=1; break; fi
+            if curl -fsS http://localhost:8081/ >/dev/null; then ok=1; break; fi
             if (( i % 20 == 0 )); then
               echo "--- Keycloak logs (tail) ---"
               docker compose logs --tail=50 keycloak || true
@@ -78,14 +77,14 @@ jobs:
             sleep 2
           done
           if [ "$ok" != "1" ]; then
-            echo "Keycloak did not become healthy in time."
+            echo "Keycloak did not respond in time."
             docker compose logs keycloak || true
             exit 1
           fi
-          # Flowable health (up to 4 minutes)
+          echo "Waiting for Flowable engine health..."
           ok=0
           for i in {1..120}; do
-            if docker compose ps flowable | grep -E "healthy"; then ok=1; break; fi
+            if curl -fsS -u rest-admin:test http://localhost:8082/flowable-rest/service/management/engine >/dev/null; then ok=1; break; fi
             if (( i % 20 == 0 )); then
               echo "--- Flowable logs (tail) ---"
               docker compose logs --tail=50 flowable || true
@@ -93,7 +92,7 @@ jobs:
             sleep 2
           done
           if [ "$ok" != "1" ]; then
-            echo "Flowable did not become healthy in time."
+            echo "Flowable did not respond in time."
             docker compose logs flowable || true
             exit 1
           fi
