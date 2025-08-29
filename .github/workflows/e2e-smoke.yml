@@ -121,13 +121,22 @@ jobs:
       - name: Fetch JWT from Keycloak
         id: token
         run: |
-          ACCESS_TOKEN=$(curl -s \
-            -d "client_id=assets-api" \
-            -d "grant_type=password" \
-            -d "username=test.user" \
-            -d "password=Passw0rd!" \
-            http://localhost:8081/realms/moe/protocol/openid-connect/token | jq -r .access_token)
-          if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
+          ok=0
+          for i in {1..60}; do
+            ACCESS_TOKEN=$(curl -s \
+              -d "client_id=assets-api" \
+              -d "grant_type=password" \
+              -d "username=test.user" \
+              -d "password=Passw0rd!" \
+              http://localhost:8081/realms/moe/protocol/openid-connect/token | jq -r .access_token || true)
+            if [ -n "$ACCESS_TOKEN" ] && [ "$ACCESS_TOKEN" != "null" ]; then ok=1; break; fi
+            if (( i % 10 == 0 )); then
+              echo "--- Keycloak logs (tail) ---"
+              docker compose logs --tail=80 keycloak || true
+            fi
+            sleep 2
+          done
+          if [ "$ok" != "1" ]; then
             echo "Failed to get token"; exit 1
           fi
           echo "token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
