@@ -239,15 +239,21 @@ api.MapPost("/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAssetDt
     }
 
     string? wfId = null;
-    try
+    var startWf = builder.Configuration.GetValue<bool>("Workflows:StartOnAssetCreate");
+    var isCi = string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
+    if (startWf && !isCi)
     {
-        wfId = await wf.StartProcessAsync("asset_registration", new Dictionary<string,object> {
-            ["assetId"] = a.Id, ["assetType"] = t.Name, ["region"] = a.Region, ["city"] = a.City
-        });
-    }
-    catch (Exception ex)
-    {
-        Log.Warning(ex, "Failed to start Flowable process for asset {AssetId}", a.Id);
+        try
+        {
+            wfId = await wf.StartProcessAsync("asset_registration", new Dictionary<string,object> {
+                ["assetId"] = a.Id, ["assetType"] = t.Name, ["region"] = a.Region, ["city"] = a.City
+            });
+        }
+        catch (Exception ex)
+        {
+            if (!app.Environment.IsDevelopment()) throw;
+            Log.Warning(ex, "Flowable start failed in Dev/CI; continuing for asset {AssetId}", a.Id);
+        }
     }
     if (!string.IsNullOrWhiteSpace(wfId))
     {

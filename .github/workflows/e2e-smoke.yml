@@ -171,13 +171,15 @@ jobs:
       - name: Read workflow instance
         id: wf
         run: |
+          WF_STATUS="NA"
           if [ -n "${{ steps.asset.outputs.asset_id }}" ]; then
-            curl -fsS -H "Authorization: Bearer ${{ steps.token.outputs.token }}" \
-              http://localhost:8080/api/workflows/asset/${{ steps.asset.outputs.asset_id }} \
-              -o /tmp/workflow.json || true
+            WF_STATUS=$(curl -sS -w "%{http_code}" -H "Authorization: Bearer ${{ steps.token.outputs.token }}" \
+              -o /tmp/workflow.json \
+              http://localhost:8080/api/workflows/asset/${{ steps.asset.outputs.asset_id }})
           else
             echo '{}' > /tmp/workflow.json
           fi
+          echo "status=$WF_STATUS" >> "$GITHUB_OUTPUT"
           cat /tmp/workflow.json || true
 
       - name: Prepare 4-line report
@@ -185,7 +187,7 @@ jobs:
           {
             echo "API health: $(curl -fsS http://localhost:8080/health || echo FAIL)"
             echo "Create asset status: ${{ steps.create.outputs.status }} (assetId=${{ steps.asset.outputs.asset_id }})"
-            echo "Workflow read: $(jq -r '.status // .Status // \"NOT_FOUND\"' /tmp/workflow.json 2>/dev/null || echo 'NOT_FOUND')"
+            echo "Workflow read HTTP: ${{ steps.wf.outputs.status }}"
             echo "OCR quick check: skipped (image/PDF upload not run in CI)"
           } | tee e2e-report.txt
 
