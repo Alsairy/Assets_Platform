@@ -103,14 +103,21 @@ jobs:
           set -e
           docker compose up -d api
           echo "Waiting for API health..."
+          ok=0
           for i in {1..120}; do
-            if curl -fsS http://localhost:8080/health >/dev/null; then break; fi
+            if curl -fsS http://localhost:8080/health >/dev/null; then ok=1; break; fi
             if (( i % 20 == 0 )); then
               echo "--- API logs (tail) ---"
               docker compose logs --tail=50 api || true
             fi
             sleep 2
           done
+          if [ "$ok" != "1" ]; then
+            echo "API did not become healthy in time."
+            docker compose ps || true
+            docker compose logs api || true
+            exit 1
+          fi
 
       - name: Fetch JWT from Keycloak
         id: token

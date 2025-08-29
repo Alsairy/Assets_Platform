@@ -23,14 +23,14 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
     ports:
-      - "8081:8080"   # host:container
+      - "8081:8080"
     volumes:
       - ./keycloak/realms:/opt/keycloak/data/import
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/"]
       interval: 10s
       timeout: 5s
-      retries: 20
+      retries: 40
     depends_on:
       db:
         condition: service_started
@@ -51,11 +51,10 @@ services:
     ports:
       - "8082:8080"
     healthcheck:
-      # secure engine healthcheck using REST admin
       test: ["CMD", "curl", "-fsS", "-u", "rest-admin:test", "http://localhost:8080/flowable-rest/service/management/engine"]
-      interval: 15s
+      interval: 10s
       timeout: 5s
-      retries: 20
+      retries: 40
     depends_on:
       db:
         condition: service_started
