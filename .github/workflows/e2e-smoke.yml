@@ -7,6 +7,13 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   e2e-smoke:
     runs-on: ubuntu-latest
@@ -114,6 +121,7 @@ jobs:
           if [ "$ok" != "1" ]; then
             echo "API did not become healthy in time."
             docker compose ps || true
+            docker compose logs db || true
             docker compose logs api || true
             exit 1
           fi

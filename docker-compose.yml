@@ -14,7 +14,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-
+      start_period: 15s
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
     container_name: assets-keycloak
@@ -79,6 +79,7 @@ services:
       # OCR: leave fake for E2E; images sync, PDFs handled later by async worker
       OCR__PROVIDER: Fake
       OCR__CONFIDENCETHRESHOLD: "0.85"
+      CI: "true"
     ports:
       - "8080:8080"
     healthcheck:
