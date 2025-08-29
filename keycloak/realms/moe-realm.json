@@ -1,0 +1,29 @@
+{
+  "realm": "moe",
+  "enabled": true,
+  "registrationAllowed": false,
+  "clients": [
+    {
+      "clientId": "assets-api",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:*/*"],
+      "webOrigins": ["*"]
+    }
+  ],
+  "users": [
+    {
+      "username": "test.user",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "User",
+      "credentials": [{ "type": "password", "value": "Passw0rd!", "temporary": false }],
+      "requiredActions": [],
+      "realmRoles": ["offline_access", "uma_authorization", "Admin"]
+    }
+  ],
+  "roles": { "realm": [ { "name": "Admin" }, { "name": "Officer" } ] }
+}

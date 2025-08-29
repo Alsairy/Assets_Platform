@@ -54,9 +54,13 @@ jobs:
       - name: Set up Docker
         uses: docker/setup-buildx-action@v3
 
-      - name: Pre-pull images (faster startup)
+      - name: Pull images (faster startup)
         run: |
-          docker compose pull db keycloak flowable api || true
+          docker compose pull db keycloak flowable || true
+
+      - name: Build API
+        run: |
+          docker compose build api
 
       - name: Start compose stack
         run: |
