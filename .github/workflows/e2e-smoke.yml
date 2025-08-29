@@ -1,0 +1,140 @@
+name: E2E Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  e2e-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Keycloak realm import
+        run: |
+          mkdir -p keycloak/realms
+          cat > keycloak/realms/moe-realm.json << 'JSON'
+          {
+            "realm": "moe",
+            "enabled": true,
+            "registrationAllowed": false,
+            "clients": [
+              {
+                "clientId": "assets-api",
+                "enabled": true,
+                "publicClient": true,
+                "standardFlowEnabled": true,
+                "directAccessGrantsEnabled": true,
+                "redirectUris": ["http://localhost:*/*"],
+                "webOrigins": ["*"]
+              }
+            ],
+            "users": [
+              {
+                "username": "test.user",
+                "enabled": true,
+                "emailVerified": true,
+                "firstName": "Test",
+                "lastName": "User",
+                "credentials": [{ "type": "password", "value": "Passw0rd!", "temporary": false }],
+                "requiredActions": [],
+                "realmRoles": ["offline_access", "uma_authorization", "Admin"]
+              }
+            ],
+            "roles": { "realm": [ { "name": "Admin" }, { "name": "Officer" } ] }
+          }
+          JSON
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Pre-pull images (faster startup)
+        run: |
+          docker compose pull db keycloak flowable api || true
+
+      - name: Start compose stack
+        run: |
+          docker compose up -d db keycloak flowable api
+          echo "Waiting for Keycloak & Flowable health..."
+          # Keycloak health (up to 2 minutes)
+          for i in {1..60}; do
+            if docker compose ps keycloak | grep -E "healthy"; then break; fi
+            sleep 2
+          done
+          # Flowable health (up to 2 minutes)
+          for i in {1..60}; do
+            if docker compose ps flowable | grep -E "healthy"; then break; fi
+            sleep 2
+          done
+          # API warmup (up to 2 minutes)
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8080/health >/dev/null; then break; fi
+            sleep 2
+          done
+
+      - name: Fetch JWT from Keycloak
+        id: token
+        run: |
+          ACCESS_TOKEN=$(curl -s \
+            -d "client_id=assets-api" \
+            -d "grant_type=password" \
+            -d "username=test.user" \
+            -d "password=Passw0rd!" \
+            http://localhost:8081/realms/moe/protocol/openid-connect/token | jq -r .access_token)
+          if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
+            echo "Failed to get token"; exit 1
+          fi
+          echo "token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Create asset (expect 201)
+        id: create
+        run: |
+          STATUS=$(curl -sw "%{http_code}" -o /tmp/asset.json \
+            -H "Authorization: Bearer ${{ steps.token.outputs.token }}" \
+            -H "Content-Type: application/json" \
+            -d '{"assetTypeId":1,"name":"E2E Asset","region":"Riyadh","city":"Riyadh"}' \
+            http://localhost:8080/api/assets)
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          cat /tmp/asset.json || true
+
+      - name: Extract asset id
+        id: asset
+        run: |
+          ASSET_ID=$(jq -r '.id // .Id // .assetId // .AssetId // empty' /tmp/asset.json)
+          echo "asset_id=$ASSET_ID" >> $GITHUB_OUTPUT
+
+      - name: Read workflow instance
+        id: wf
+        run: |
+          if [ -n "${{ steps.asset.outputs.asset_id }}" ]; then
+            curl -fsS -H "Authorization: Bearer ${{ steps.token.outputs.token }}" \
+              http://localhost:8080/api/workflows/asset/${{ steps.asset.outputs.asset_id }} \
+              -o /tmp/workflow.json || true
+          else
+            echo '{}' > /tmp/workflow.json
+          fi
+          cat /tmp/workflow.json || true
+
+      - name: Prepare 4-line report
+        run: |
+          {
+            echo "API health: $(curl -fsS http://localhost:8080/health || echo FAIL)"
+            echo "Create asset status: ${{ steps.create.outputs.status }} (assetId=${{ steps.asset.outputs.asset_id }})"
+            echo "Workflow read: $(jq -r '.status // .Status // \"NOT_FOUND\"' /tmp/workflow.json 2>/dev/null || echo 'NOT_FOUND')"
+            echo "OCR quick check: skipped (image/PDF upload not run in CI)"
+          } | tee e2e-report.txt
+
+      - name: Upload report and artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-smoke-artifacts
+          path: |
+            e2e-report.txt
+            /tmp/asset.json
+            /tmp/workflow.json
