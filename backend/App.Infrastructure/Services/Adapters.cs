@@ -12,7 +12,9 @@ namespace App.Infrastructure.Services;
 public interface IWorkflowEngine
 {
     Task<string> StartProcessAsync(string processKey, IDictionary<string, object> variables);
+    Task<List<FlowableTaskDto>> ListTasksAsync(string processInstanceId, CancellationToken ct = default);
 }
+public record FlowableTaskDto(string Id, string Name, string? Assignee, DateTime? CreateTime, DateTime? DueDate);
 
 public class FlowableWorkflowEngineAdapter : IWorkflowEngine
 {
@@ -56,6 +58,38 @@ public class FlowableWorkflowEngineAdapter : IWorkflowEngine
         using var doc = System.Text.Json.JsonDocument.Parse(txt);
         return doc.RootElement.GetProperty("id").GetString() ?? $"wf_{Guid.NewGuid():N}";
     }
+
+    public async Task<List<FlowableTaskDto>> ListTasksAsync(string processInstanceId, CancellationToken ct = default)
+    {
+        var url = $"/service/runtime/tasks?processInstanceId={Uri.EscapeDataString(processInstanceId)}";
+        var res = await _http.GetAsync(url, ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            var body = await res.Content.ReadAsStringAsync(ct);
+            throw new Exception($"Flowable tasks error {res.StatusCode}: {body}");
+        }
+        var txt = await res.Content.ReadAsStringAsync(ct);
+        using var doc = System.Text.Json.JsonDocument.Parse(txt);
+        var list = new List<FlowableTaskDto>();
+        foreach (var el in doc.RootElement.GetProperty("data").EnumerateArray())
+        {
+            var id = el.GetProperty("id").GetString() ?? "";
+            var name = el.TryGetProperty("name", out var n) ? n.GetString() : null;
+            var assignee = el.TryGetProperty("assignee", out var a) ? a.GetString() : null;
+            DateTime? ctAt = null;
+            if (el.TryGetProperty("createTime", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                if (DateTime.TryParse(c.GetString(), out var tmp)) ctAt = tmp;
+            }
+            DateTime? due = null;
+            if (el.TryGetProperty("dueDate", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                if (DateTime.TryParse(d.GetString(), out var tmp2)) due = tmp2;
+            }
+            list.Add(new FlowableTaskDto(id, name ?? "", assignee, ctAt, due));
+        }
+        return list;
+    }
 }
 
 public interface IOcrService
@@ -73,7 +107,7 @@ public class GoogleVisionOcrService : IOcrService
     public GoogleVisionOcrService(ImageAnnotatorClient vision, IConfiguration cfg)
     {
         _vision = vision; _cfg = cfg;
-        _threshold = _cfg.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.8;
+        _threshold = _cfg.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.85;
         _hints = _cfg.GetSection("OCR:LanguageHints").Get<string[]>() ?? new[] { "ar", "en" };
     }
 
