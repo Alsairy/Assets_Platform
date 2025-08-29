@@ -134,6 +134,7 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
 var ocrConfidenceThreshold = builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.85;
+builder.Services.AddHostedService<OcrJobWorker>();
 var app = builder.Build();
 app.UseCors();
 app.UseSwagger();
@@ -364,14 +365,19 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
     {
         doc.OcrStatus = OcrStatus.Pending;
         await db.SaveChangesAsync();
-        db.OcrJobs.Add(new OcrJob
+        var inputUri = $"gs://{bucket}/{objectName}";
+        var outputUri = $"gs://{bucket}/tmp/ocr/{Guid.NewGuid():N}/";
+        var job = new OcrJob
         {
             DocumentId = doc.Id,
             Status = "Queued",
-            StartedAt = DateTime.UtcNow
-        });
+            Attempts = 0,
+            GcsInputUri = inputUri,
+            GcsOutputUri = outputUri
+        };
+        db.OcrJobs.Add(job);
         await db.SaveChangesAsync();
-        return Results.Accepted($"/api/documents/{doc.Id}/status", new { doc.Id, status = doc.OcrStatus.ToString() });
+        return Results.Accepted($"/api/documents/{doc.Id}/status", new { documentId = doc.Id, jobId = job.Id, status = doc.OcrStatus.ToString() });
     }
 
     var (ok, text, extracted, conf) = await ocr.ProcessAsync(bucket!, objectName, f.ContentType, req.HttpContext.RequestAborted);

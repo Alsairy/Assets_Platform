@@ -118,6 +118,16 @@ jobs:
             exit 1
           fi
 
+      - name: Wait for OIDC discovery
+        run: |
+          ok=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8081/realms/moe/.well-known/openid-configuration >/dev/null; then ok=1; break; fi
+            if (( i % 10 == 0 )); then docker compose logs --tail=80 keycloak || true; fi
+            sleep 2
+          done
+          if [ "$ok" != "1" ]; then echo "OIDC discovery not ready"; exit 1; fi
+
       - name: Fetch JWT from Keycloak
         id: token
         run: |
