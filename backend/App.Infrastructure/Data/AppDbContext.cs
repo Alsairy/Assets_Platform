@@ -55,6 +55,32 @@ public class AppDbContext : DbContext
                 "\"OcrConfidence\" IS NULL OR (\"OcrConfidence\" >= 0 AND \"OcrConfidence\" <= 1)");
 
         modelBuilder.Entity<Document>()
+            .Property(d => d.OcrStatus)
+            .HasConversion<string>();
+
+        modelBuilder.Entity<OcrJob>().ToTable("ocr_jobs");
+        modelBuilder.Entity<OcrJob>()
+            .HasOne(j => j.Document)
+            .WithMany()
+            .HasForeignKey(j => j.DocumentId);
+        modelBuilder.Entity<OcrJob>()
+            .HasIndex(j => new { j.DocumentId, j.Status });
+        modelBuilder.Entity<OcrJob>()
+            .HasIndex(j => j.ProviderOpId);
+        modelBuilder.Entity<OcrJob>()
+            .HasIndex(j => new { j.Status, j.LeaseUntil });
+        modelBuilder.Entity<OcrJob>()
+            .HasCheckConstraint("CK_ocr_jobs_Attempts_nonneg", "\"Attempts\" >= 0");
+        modelBuilder.Entity<OcrJob>()
+            .Property(j => j.ProviderOpId).HasMaxLength(200);
+        modelBuilder.Entity<OcrJob>()
+            .Property(j => j.GcsInputUri).HasMaxLength(512);
+        modelBuilder.Entity<OcrJob>()
+            .Property(j => j.GcsOutputUri).HasMaxLength(512);
+        modelBuilder.Entity<OcrJob>()
+            .Property(j => j.LeaseOwner).HasMaxLength(128);
+
+        modelBuilder.Entity<Document>()
             .HasIndex(d => d.AssetId);
 
         modelBuilder.Entity<Document>()

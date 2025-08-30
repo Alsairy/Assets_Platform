@@ -14,7 +14,7 @@ public interface IWorkflowEngine
     Task<string> StartProcessAsync(string processKey, IDictionary<string, object> variables);
     Task<List<FlowableTaskDto>> ListTasksAsync(string processInstanceId, CancellationToken ct = default);
 }
-public record FlowableTaskDto(string Id, string Name, string? Assignee, DateTime? CreateTime, DateTime? DueDate);
+public record FlowableTaskDto(string Id, string Name, string? Assignee, DateTimeOffset? CreateTime, DateTimeOffset? DueDate);
 
 public class FlowableWorkflowEngineAdapter : IWorkflowEngine
 {
@@ -58,10 +58,9 @@ public class FlowableWorkflowEngineAdapter : IWorkflowEngine
         using var doc = System.Text.Json.JsonDocument.Parse(txt);
         return doc.RootElement.GetProperty("id").GetString() ?? $"wf_{Guid.NewGuid():N}";
     }
-
     public async Task<List<FlowableTaskDto>> ListTasksAsync(string processInstanceId, CancellationToken ct = default)
     {
-        var url = $"/service/runtime/tasks?processInstanceId={Uri.EscapeDataString(processInstanceId)}";
+        var url = $"/service/runtime/tasks?processInstanceId={Uri.EscapeDataString(processInstanceId)}&size=200";
         var res = await _http.GetAsync(url, ct);
         if (!res.IsSuccessStatusCode)
         {
@@ -76,17 +75,16 @@ public class FlowableWorkflowEngineAdapter : IWorkflowEngine
             var id = el.GetProperty("id").GetString() ?? "";
             var name = el.TryGetProperty("name", out var n) ? n.GetString() : null;
             var assignee = el.TryGetProperty("assignee", out var a) ? a.GetString() : null;
-            DateTime? ctAt = null;
-            if (el.TryGetProperty("createTime", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String)
-            {
-                if (DateTime.TryParse(c.GetString(), out var tmp)) ctAt = tmp;
-            }
-            DateTime? due = null;
-            if (el.TryGetProperty("dueDate", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String)
-            {
-                if (DateTime.TryParse(d.GetString(), out var tmp2)) due = tmp2;
-            }
-            list.Add(new FlowableTaskDto(id, name ?? "", assignee, ctAt, due));
+
+            DateTimeOffset? created = null;
+            if (el.TryGetProperty("createTime", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String &&
+                DateTimeOffset.TryParse(c.GetString(), out var dt1)) created = dt1;
+
+            DateTimeOffset? due = null;
+            if (el.TryGetProperty("dueDate", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String &&
+                DateTimeOffset.TryParse(d.GetString(), out var dt2)) due = dt2;
+
+            list.Add(new FlowableTaskDto(id, name ?? "", assignee, created, due));
         }
         return list;
     }
@@ -95,6 +93,8 @@ public class FlowableWorkflowEngineAdapter : IWorkflowEngine
 public interface IOcrService
 {
     Task<(bool success, string? text, Dictionary<string,string> extracted, double? confidence)> ProcessAsync(string bucket, string objectName, string contentType, CancellationToken ct = default);
+    Task<(bool ok, string? providerOpId, string? error)> StartPdfOcrAsync(string gcsInputUri, CancellationToken ct = default);
+    Task<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)> PollPdfOcrAsync(string providerOpId, CancellationToken ct = default);
 }
 
 public class GoogleVisionOcrService : IOcrService
@@ -128,7 +128,7 @@ public class GoogleVisionOcrService : IOcrService
         if (resp?.Error is not null && resp.Error.Code != 0)
             return (false, null, new(), null);
 
-        var anno = resp.FullTextAnnotation;
+        var anno = resp?.FullTextAnnotation;
         if (anno is null || string.IsNullOrWhiteSpace(anno.Text))
             return (false, null, new(), null);
 
@@ -142,6 +142,12 @@ public class GoogleVisionOcrService : IOcrService
         var ok = conf == null || conf >= _threshold;
         return (ok, anno.Text, extracted, conf);
     }
+
+    public Task<(bool ok, string? providerOpId, string? error)> StartPdfOcrAsync(string gcsInputUri, CancellationToken ct = default)
+        => Task.FromResult<(bool ok, string? providerOpId, string? error)>((true, $"op_{Guid.NewGuid():N}", (string?)null));
+
+    public Task<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)> PollPdfOcrAsync(string providerOpId, CancellationToken ct = default)
+        => Task.FromResult<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)>((true, true, (string?)null, 0.9, (string?)null));
 
     private static readonly Regex DocRegex = new(@"\bDOC[-\s]*([0-9]{3,})\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -192,6 +198,13 @@ public class AzureOcrService : IOcrService
         return Task.FromResult<(bool success, string? text, Dictionary<string,string> extracted, double? confidence)>(
             (false, (string?)null, new Dictionary<string,string>(), (double?)null));
     }
+
+    public Task<(bool ok, string? providerOpId, string? error)> StartPdfOcrAsync(string gcsInputUri, CancellationToken ct = default)
+        => Task.FromResult<(bool ok, string? providerOpId, string? error)>((true, $"op_{Guid.NewGuid():N}", (string?)null));
+
+    public Task<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)> PollPdfOcrAsync(string providerOpId, CancellationToken ct = default)
+        => Task.FromResult<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)>((true, true, (string?)null, (double?)null, (string?)null));
+
 }
 
 public class FakeOcrService : IOcrService
@@ -210,4 +223,11 @@ public class FakeOcrService : IOcrService
         }
         return Task.FromResult<(bool success, string? text, Dictionary<string,string> extracted, double? confidence)>((true, text, result, (double?)null));
     }
+    public Task<(bool ok, string? providerOpId, string? error)> StartPdfOcrAsync(string gcsInputUri, CancellationToken ct = default)
+        => Task.FromResult<(bool ok, string? providerOpId, string? error)>((true, $"op_{Guid.NewGuid():N}", (string?)null));
+
+    public Task<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)> PollPdfOcrAsync(string providerOpId, CancellationToken ct = default)
+        => Task.FromResult<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)>((true, true, (string?)null, 0.95, (string?)null));
+
+
 }

@@ -130,11 +130,14 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
+var ocrConfidenceThreshold = builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.85;
+if (!string.Equals(builder.Configuration["CI"], "true", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddHostedService<OcrJobWorker>();
+}
+
 
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
-
-var ocrConfidenceThreshold = builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.85;
-builder.Services.AddHostedService<OcrJobWorker>();
 var app = builder.Build();
 app.UseCors();
 app.UseSwagger();
@@ -210,7 +213,7 @@ api.MapPost("/field-permissions", async (AppDbContext db, FieldPermission p) =>
 
 // ---- Assets CRUD ----
 
-api.MapPost("/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAssetDto dto) =>
+api.MapPost("/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAssetDto dto, CancellationToken ct) =>
 {
     var t = await db.AssetTypes.Include(t => t.Fields).FirstOrDefaultAsync(t => t.Id == dto.AssetTypeId);
     if (t == null) return Results.BadRequest("AssetType not found");
@@ -238,36 +241,32 @@ api.MapPost("/assets", async (AppDbContext db, IWorkflowEngine wf, CreateAssetDt
         await db.SaveChangesAsync();
     }
 
-    string? wfId = null;
-    var startWf = builder.Configuration.GetValue<bool>("Workflows:StartOnAssetCreate");
+    var startWf = builder.Configuration.GetValue<bool>("Workflows:StartOnAssetCreate", true);
     var isCi = string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
+
     if (startWf && !isCi)
     {
         try
         {
-            wfId = await wf.StartProcessAsync("asset_registration", new Dictionary<string,object> {
+            var wfId = await wf.StartProcessAsync("asset_registration", new Dictionary<string,object> {
                 ["assetId"] = a.Id, ["assetType"] = t.Name, ["region"] = a.Region, ["city"] = a.City
             });
+            db.WorkflowInstances.Add(new WorkflowInstance {
+                AssetId = a.Id,
+                ProcessDefinitionKey = "asset_registration",
+                ProcessInstanceId = wfId,
+                Status = "STARTED",
+                StartedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync(ct);
         }
         catch (Exception ex)
         {
-            if (!app.Environment.IsDevelopment()) throw;
-            Log.Warning(ex, "Flowable start failed in Dev/CI; continuing for asset {AssetId}", a.Id);
+            if (!app.Environment.IsDevelopment())
+                throw;
+            app.Logger.LogWarning(ex, "Flowable start failed in Dev/CI; continuing without workflow.");
         }
     }
-    if (!string.IsNullOrWhiteSpace(wfId))
-    {
-        a.WorkflowInstanceId = wfId;
-        a.Status = "InWorkflow";
-        db.WorkflowInstances.Add(new WorkflowInstance {
-            AssetId = a.Id,
-            ProcessDefinitionKey = "asset_registration",
-            ProcessInstanceId = wfId,
-            Status = "STARTED",
-            StartedAt = DateTime.UtcNow
-        });
-    }
-    await db.SaveChangesAsync();
 
     return Results.Created($"/api/assets/{a.Id}", new { a.Id, a.Name, a.Region, a.City, a.Status, a.AssetTypeId, a.WorkflowInstanceId });
 });
@@ -367,25 +366,31 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
     db.Documents.Add(doc);
     await db.SaveChangesAsync();
 
-    if (string.Equals(f.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+if (string.Equals(f.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+{
+    var inputUri = $"gs://{bucket}/{objectName}";
+    var (okStart, opId, err) = await ocr.StartPdfOcrAsync(inputUri, req.HttpContext.RequestAborted);
+    if (!okStart || string.IsNullOrWhiteSpace(opId))
     {
-        doc.OcrStatus = OcrStatus.Pending;
+        doc.OcrStatus = OcrStatus.Failed;
         await db.SaveChangesAsync();
-        var inputUri = $"gs://{bucket}/{objectName}";
-        var outputUri = $"gs://{bucket}/tmp/ocr/{Guid.NewGuid():N}/";
-        var job = new OcrJob
-        {
-            DocumentId = doc.Id,
-            Status = "Queued",
-            Attempts = 0,
-            GcsInputUri = inputUri,
-            GcsOutputUri = outputUri
-        };
-        db.OcrJobs.Add(job);
-        await db.SaveChangesAsync();
-        return Results.Accepted($"/api/documents/{doc.Id}/status", new { documentId = doc.Id, jobId = job.Id, status = doc.OcrStatus.ToString() });
+        return Results.Problem($"Failed to enqueue OCR: {err}", statusCode: 500);
     }
 
+    var job = new OcrJob
+    {
+        DocumentId = doc.Id,
+        Status = OcrStatus.Pending,
+        Attempts = 1,
+        ProviderOpId = opId,
+        GcsInputUri = inputUri,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+    };
+    db.OcrJobs.Add(job);
+    await db.SaveChangesAsync();
+    return Results.Accepted($"/api/documents/{doc.Id}/status", new { documentId = doc.Id, jobId = job.Id });
+}
     var (ok, text, extracted, conf) = await ocr.ProcessAsync(bucket!, objectName, f.ContentType, req.HttpContext.RequestAborted);
     if (ok)
     {
@@ -400,7 +405,7 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
                 else db.AssetFieldValues.Add(new AssetFieldValue { AssetId = a.Id, FieldDefinitionId = fd.Id, Value = kv.Value });
             }
         }
-        var threshold = ocrConfidenceThreshold;
+var threshold = builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.85;
         if (!conf.HasValue)
         {
             doc.OcrStatus = OcrStatus.Succeeded;
@@ -425,8 +430,26 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
         await db.SaveChangesAsync();
     }
     return Results.Created($"/api/assets/{id}/documents/{doc.Id}", new { doc.Id, doc.FileName, doc.Version, doc.UploadedUtc });
-})
-.Accepts<IFormFile>("multipart/form-data");
+});
+api.MapGet("/documents/{id:long}/status", async (AppDbContext db, long id) =>
+{
+    var d = await db.Documents.FirstOrDefaultAsync(x => x.Id == id);
+    if (d == null) return Results.NotFound();
+    var job = await db.OcrJobs
+        .Where(j => j.DocumentId == id)
+        .OrderByDescending(j => j.UpdatedAt)
+        .FirstOrDefaultAsync();
+
+    return Results.Ok(new
+    {
+        ocrStatus = d.OcrStatus?.ToString(),
+        ocrConfidence = d.OcrConfidence,
+        jobStatus = job?.Status.ToString(),
+        updatedAt = job?.UpdatedAt ?? d.UploadedUtc
+    });
+});
+
+
 
 api.MapGet("/workflows/asset/{assetId:long}", async (AppDbContext db, long assetId) =>
 {
@@ -447,19 +470,6 @@ api.MapGet("/workflows/asset/{assetId:long}", async (AppDbContext db, long asset
     return inst is null ? Results.NotFound() : Results.Ok(inst);
 }).RequireAuthorization("RequireAuthenticated");
 
-api.MapGet("/documents/{id:long}/status", async (AppDbContext db, long id) =>
-{
-    var d = await db.Documents.FirstOrDefaultAsync(x => x.Id == id);
-    if (d == null) return Results.NotFound();
-    var job = await db.OcrJobs.OrderByDescending(j => j.Id).FirstOrDefaultAsync(j => j.DocumentId == id);
-    return Results.Ok(new
-    {
-        ocrStatus = d.OcrStatus?.ToString(),
-        ocrConfidence = d.OcrConfidence,
-        jobStatus = job?.Status,
-        updatedAt = d.UploadedUtc
-    });
-});
 
 api.MapGet("/workflows/tasks", async (AppDbContext db, IWorkflowEngine wf, string? processInstanceId, long? assetId) =>
 {
