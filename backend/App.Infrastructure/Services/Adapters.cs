@@ -124,7 +124,7 @@ public class GoogleVisionOcrService : IOcrService
         if (resp?.Error is not null && resp.Error.Code != 0)
             return (false, null, new(), null);
 
-        var anno = resp.FullTextAnnotation;
+        var anno = resp?.FullTextAnnotation;
         if (anno is null || string.IsNullOrWhiteSpace(anno.Text))
             return (false, null, new(), null);
 
