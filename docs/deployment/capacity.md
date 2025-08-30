@@ -12,5 +12,6 @@ Worker
 
 NetworkPolicy
 - Default deny egress
-- Allow ingress from ingress controller to API
-- Allow egress 443 for API and worker
+- Allow ingress from ingress controller to API (namespaceSelector + podSelector for ingress-nginx)
+- Allow egress 443/TCP for API and worker
+- Allow DNS egress to kube-dns/coredns (UDP/TCP 53) for API and worker when default-deny egress is enabled

@@ -59,7 +59,5 @@ spec:
             capabilities: { drop: ["ALL"] }
           volumeMounts:
             - { name: tmp,            mountPath: /tmp }
-            - { name: dataprotection, mountPath: /home/app/.aspnet/DataProtection-Keys }
       volumes:
         - { name: tmp,            emptyDir: {} }
-        - { name: dataprotection, emptyDir: {} }

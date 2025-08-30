@@ -5,8 +5,6 @@ resources:
   - worker-deployment.yaml
   - api-service.yaml
   - ingress.yaml
-  - configmap.yaml
-  - secrets.template.yaml
 images:
   - name: ghcr.io/alsairy/assets_platform/api
     newName: ghcr.io/alsairy/assets_platform/api
@@ -14,3 +12,15 @@ images:
   - name: ghcr.io/alsairy/assets_platform/worker
     newName: ghcr.io/alsairy/assets_platform/worker
     newTag: "{{VERSION}}"
+configMapGenerator:
+  - name: assets-config
+    literals:
+      - OIDC__AUTHORITY=https://idp.example.com/realms/moe
+      - OIDC__AUDIENCE=assets-api
+      - Flowable__BaseUrl=https://flowable.example.com/flowable-rest
+      - OCR__PROVIDER=Google
+      - OCR__CONFIDENCETHRESHOLD=0.85
+      - GoogleCloud__ProjectId=your-gcp-project
+      - GCS__BucketName=your-gcs-bucket
+generatorOptions:
+  disableNameSuffixHash: false
