@@ -130,6 +130,12 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
+var ocrConfidenceThreshold = builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.85;
+if (!string.Equals(builder.Configuration["CI"], "true", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddHostedService<OcrJobWorker>();
+}
+
 
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
@@ -348,6 +354,32 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
     db.Documents.Add(doc);
     await db.SaveChangesAsync();
 
+    if (string.Equals(f.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+    {
+        var inputUri = $"gs://{bucket}/{objectName}";
+        var (okStart, opId, err) = await ocr.StartPdfOcrAsync(inputUri, req.HttpContext.RequestAborted);
+        if (!okStart || string.IsNullOrWhiteSpace(opId))
+        {
+            doc.OcrStatus = OcrStatus.Failed;
+            await db.SaveChangesAsync();
+            return Results.Problem($"Failed to enqueue OCR: {err}", statusCode: 500);
+        }
+
+        var job = new OcrJob
+        {
+            DocumentId = doc.Id,
+            Status = "Queued",
+            Attempts = 1,
+            ProviderOpId = opId,
+            GcsInputUri = inputUri,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.OcrJobs.Add(job);
+        await db.SaveChangesAsync();
+        return Results.Accepted($"/api/documents/{doc.Id}/status", new { documentId = doc.Id, jobId = job.Id });
+    }
+
     var (ok, text, extracted, conf) = await ocr.ProcessAsync(bucket!, objectName, f.ContentType, req.HttpContext.RequestAborted);
     if (ok)
     {
@@ -362,7 +394,7 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
                 else db.AssetFieldValues.Add(new AssetFieldValue { AssetId = a.Id, FieldDefinitionId = fd.Id, Value = kv.Value });
             }
         }
-        var threshold = builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.8;
+        var threshold = builder.Configuration.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.85;
         if (!conf.HasValue)
         {
             doc.OcrStatus = OcrStatus.Succeeded;
@@ -387,8 +419,32 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
         await db.SaveChangesAsync();
     }
     return Results.Created($"/api/assets/{id}/documents/{doc.Id}", new { doc.Id, doc.FileName, doc.Version, doc.UploadedUtc });
-})
-.Accepts<IFormFile>("multipart/form-data");
+});
+api.MapGet("/documents/{id:long}/status", async (AppDbContext db, long id) =>
+{
+    var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+    if (doc == null) return Results.NotFound();
+    var job = await db.OcrJobs.OrderByDescending(j => j.Id).FirstOrDefaultAsync(j => j.DocumentId == id);
+    return Results.Ok(new
+    {
+        documentId = doc.Id,
+        ocrStatus = doc.OcrStatus.ToString(),
+        ocrConfidence = doc.OcrConfidence,
+        jobStatus = job?.Status,
+        attempts = job?.Attempts,
+        lastError = job?.LastError,
+        updatedAt = doc.UploadedUtc
+    });
+});
+
+api.MapGet("/workflows/tasks", async (AppDbContext db, IWorkflowEngine wf, long assetId, int size = 200, CancellationToken ct = default) =>
+{
+    var inst = await db.Set<WorkflowInstance>().FirstOrDefaultAsync(w => w.AssetId == assetId, ct);
+    if (inst == null || string.IsNullOrWhiteSpace(inst.ProcessInstanceId)) return Results.Ok(Array.Empty<object>());
+    var tasks = await wf.ListTasksAsync(inst.ProcessInstanceId!, size, ct);
+    return Results.Ok(tasks);
+});
+
 
 api.MapGet("/workflows/asset/{assetId:long}", async (AppDbContext db, long assetId) =>
 {

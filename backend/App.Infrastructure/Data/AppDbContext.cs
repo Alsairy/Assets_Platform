@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<WorkflowInstance> WorkflowInstances => Set<WorkflowInstance>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<FieldPermission> FieldPermissions => Set<FieldPermission>();
+    public DbSet<OcrJob> OcrJobs => Set<OcrJob>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -52,6 +53,32 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Document>()
             .HasCheckConstraint("CK_documents_OcrConfidence_0_1",
                 "\"OcrConfidence\" IS NULL OR (\"OcrConfidence\" >= 0 AND \"OcrConfidence\" <= 1)");
+
+        modelBuilder.Entity<Document>()
+            .Property(d => d.OcrStatus)
+            .HasConversion<string>();
+
+        modelBuilder.Entity<OcrJob>().ToTable("ocr_jobs");
+        modelBuilder.Entity<OcrJob>()
+            .HasOne(j => j.Document)
+            .WithMany()
+            .HasForeignKey(j => j.DocumentId);
+        modelBuilder.Entity<OcrJob>()
+            .HasIndex(j => new { j.DocumentId, j.Status });
+        modelBuilder.Entity<OcrJob>()
+            .HasIndex(j => j.ProviderOpId);
+        modelBuilder.Entity<OcrJob>()
+            .HasIndex(j => new { j.Status, j.LeaseUntil });
+        modelBuilder.Entity<OcrJob>()
+            .HasCheckConstraint("CK_ocr_jobs_Attempts_nonneg", "\"Attempts\" >= 0");
+        modelBuilder.Entity<OcrJob>()
+            .Property(j => j.ProviderOpId).HasMaxLength(200);
+        modelBuilder.Entity<OcrJob>()
+            .Property(j => j.GcsInputUri).HasMaxLength(512);
+        modelBuilder.Entity<OcrJob>()
+            .Property(j => j.GcsOutputUri).HasMaxLength(512);
+        modelBuilder.Entity<OcrJob>()
+            .Property(j => j.LeaseOwner).HasMaxLength(128);
 
         modelBuilder.Entity<Document>()
             .HasIndex(d => d.AssetId);
