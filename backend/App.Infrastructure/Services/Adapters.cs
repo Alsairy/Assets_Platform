@@ -219,11 +219,11 @@ public class FakeOcrService : IOcrService
         }
         return Task.FromResult<(bool success, string? text, Dictionary<string,string> extracted, double? confidence)>((true, text, result, (double?)null));
     }
-    public Task&lt;(bool ok, string? providerOpId, string? error)&gt; StartPdfOcrAsync(string gcsInputUri, CancellationToken ct = default)
-        =&gt; Task.FromResult&lt;(bool ok, string? providerOpId, string? error)&gt;((true, $"op_{Guid.NewGuid():N}", (string?)null));
+    public Task<(bool ok, string? providerOpId, string? error)> StartPdfOcrAsync(string gcsInputUri, CancellationToken ct = default)
+        => Task.FromResult<(bool ok, string? providerOpId, string? error)>((true, $"op_{Guid.NewGuid():N}", (string?)null));
 
-    public Task&lt;(bool done, bool success, string? outputUri, double? meanConfidence, string? error)&gt; PollPdfOcrAsync(string providerOpId, CancellationToken ct = default)
-        =&gt; Task.FromResult&lt;(bool done, bool success, string? outputUri, double? meanConfidence, string? error)&gt;((true, true, (string?)null, 0.95, (string?)null));
+    public Task<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)> PollPdfOcrAsync(string providerOpId, CancellationToken ct = default)
+        => Task.FromResult<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)>((true, true, (string?)null, 0.95, (string?)null));
 
 
 }
