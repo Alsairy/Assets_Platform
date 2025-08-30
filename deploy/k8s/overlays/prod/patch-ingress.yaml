@@ -1,0 +1,11 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: assets-api
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: assets.example.com
+  tls:
+    - hosts: ["assets.example.com"]
+      secretName: assets-prod-tls

@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - api-deployment.yaml
+  - worker-deployment.yaml
+  - api-service.yaml
+  - ingress.yaml
+  - configmap.yaml
+  - secrets.template.yaml
+images:
+  - name: ghcr.io/alsairy/assets_platform/api
+    newName: ghcr.io/alsairy/assets_platform/api
+    newTag: "{{VERSION}}"
+  - name: ghcr.io/alsairy/assets_platform/worker
+    newName: ghcr.io/alsairy/assets_platform/worker
+    newTag: "{{VERSION}}"
