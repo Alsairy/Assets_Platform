@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: assets-worker
+  labels:
+    app: assets-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: assets-worker
+  template:
+    metadata:
+      labels:
+        app: assets-worker
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: worker
+          image: ghcr.io/alsairy/assets_platform/api:latest
+          imagePullPolicy: IfNotPresent
+          args: []
+          env:
+            - name: WORKER_ENABLED
+              value: "true"
+          envFrom:
+            - configMapRef:
+                name: assets-config
+            - secretRef:
+                name: assets-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: dataprotection
+              mountPath: /home/app/.aspnet/DataProtection-Keys
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: dataprotection
+          emptyDir: {}
