@@ -419,7 +419,7 @@ api.MapPost("/assets/{id:long}/documents", async (AppDbContext db, IOcrService o
         await db.SaveChangesAsync();
     }
     return Results.Created($"/api/assets/{id}/documents/{doc.Id}", new { doc.Id, doc.FileName, doc.Version, doc.UploadedUtc });
-})
+});
 api.MapGet("/documents/{id:long}/status", async (AppDbContext db, long id) =>
 {
     var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == id);
@@ -445,7 +445,6 @@ api.MapGet("/workflows/tasks", async (AppDbContext db, IWorkflowEngine wf, long 
     return Results.Ok(tasks);
 });
 
-.Accepts<IFormFile>("multipart/form-data");
 
 api.MapGet("/workflows/asset/{assetId:long}", async (AppDbContext db, long assetId) =>
 {
