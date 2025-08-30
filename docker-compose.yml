@@ -26,11 +26,6 @@ services:
       - "8081:8080"
     volumes:
       - ./keycloak/realms:/opt/keycloak/data/import
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
     depends_on:
       db:
         condition: service_started
@@ -50,11 +45,6 @@ services:
       FLOWABLE_REST_APP_ADMIN_PASSWORD: test
     ports:
       - "8082:8080"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "-u", "rest-admin:test", "http://localhost:8080/flowable-rest/service/management/engine"]
-      interval: 15s
-      timeout: 5s
-      retries: 20
     depends_on:
       db:
         condition: service_started
@@ -72,6 +62,7 @@ services:
       ConnectionStrings__Default: Host=db;Port=5432;Database=appdb;Username=app;Password=app
       # OIDC authority (API is inside the network, so use service DNS)
       OIDC__AUTHORITY: http://keycloak:8080/realms/moe
+      OIDC__AUDIENCE: assets-e2e-cli
       # Flowable (colon keys → double underscore)
       FLOWABLE__BASEURL: http://flowable:8080/flowable-rest
       FLOWABLE__USERNAME: rest-admin
@@ -89,8 +80,8 @@ services:
       retries: 30
     depends_on:
       db:
-        condition: service_started
+        condition: service_healthy
       flowable:
-        condition: service_healthy
+        condition: service_started
       keycloak:
-        condition: service_healthy
+        condition: service_started

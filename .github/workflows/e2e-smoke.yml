@@ -1,3 +1,5 @@
+
+
 name: E2E Smoke
 
 on:
@@ -24,9 +26,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare Keycloak realm import
+        env:
+          KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
         run: |
           mkdir -p keycloak/realms
-          cat > keycloak/realms/moe-realm.json << 'JSON'
+          cat > keycloak/realms/moe-realm.json << JSON
           {
             "realm": "moe",
             "enabled": true,
@@ -38,20 +42,17 @@ jobs:
                 "publicClient": true,
                 "standardFlowEnabled": true,
                 "directAccessGrantsEnabled": true,
-                "redirectUris": ["http://localhost:*/*"],
-                "webOrigins": ["*"]
-              }
-            ],
-            "users": [
+                "redirectUris": ["http://localhost:8080/*"],
+                "webOrigins": ["http://localhost:8080"]
+              },
               {
-                "username": "test.user",
+                "clientId": "assets-e2e-cli",
                 "enabled": true,
-                "emailVerified": true,
-                "firstName": "Test",
-                "lastName": "User",
-                "credentials": [{ "type": "password", "value": "Passw0rd!", "temporary": false }],
-                "requiredActions": [],
-                "realmRoles": ["offline_access", "uma_authorization", "Admin"]
+                "publicClient": false,
+                "secret": "${KEYCLOAK_CLIENT_SECRET}",
+                "serviceAccountsEnabled": true,
+                "standardFlowEnabled": false,
+                "directAccessGrantsEnabled": false
               }
             ],
             "roles": { "realm": [ { "name": "Admin" }, { "name": "Officer" } ] }
@@ -103,6 +104,21 @@ jobs:
             docker compose logs flowable || true
             exit 1
           fi
+      - name: Grant Admin role to service account (assets-e2e-cli)
+        run: |
+          set -e
+          ADM=$(curl -sS -d "client_id=admin-cli" -d "grant_type=password" -d "username=admin" -d "password=admin" \
+            http://localhost:8081/realms/master/protocol/openid-connect/token | jq -r .access_token)
+          REALM=moe
+          CID=$(curl -sS -H "Authorization: Bearer $ADM" \
+            "http://localhost:8081/admin/realms/$REALM/clients?clientId=assets-e2e-cli" | jq -r '.[0].id')
+          SVC_UID=$(curl -sS -H "Authorization: Bearer $ADM" \
+            "http://localhost:8081/admin/realms/$REALM/clients/$CID/service-account-user" | jq -r '.id')
+          ADMIN_ROLE=$(curl -sS -H "Authorization: Bearer $ADM" \
+            "http://localhost:8081/admin/realms/$REALM/roles/Admin" | jq -c '{id:.id,name:.name}')
+          curl -sS -X POST -H "Authorization: Bearer $ADM" -H "Content-Type: application/json" \
+            -d "[$ADMIN_ROLE]" \
+            "http://localhost:8081/admin/realms/$REALM/users/$SVC_UID/role-mappings/realm" >/dev/null 2>&1 || true
 
       - name: Start API
         run: |
@@ -136,26 +152,19 @@ jobs:
           done
           if [ "$ok" != "1" ]; then echo "OIDC discovery not ready"; exit 1; fi
 
-      - name: Fetch JWT from Keycloak
+      - name: Fetch JWT (client_credentials)
         id: token
+        env:
+          KC_CLIENT_ID: assets-e2e-cli
+          KC_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
         run: |
-          ok=0
-          for i in {1..60}; do
-            ACCESS_TOKEN=$(curl -s \
-              -d "client_id=assets-api" \
-              -d "grant_type=password" \
-              -d "username=test.user" \
-              -d "password=Passw0rd!" \
-              http://localhost:8081/realms/moe/protocol/openid-connect/token | jq -r .access_token || true)
-            if [ -n "$ACCESS_TOKEN" ] && [ "$ACCESS_TOKEN" != "null" ]; then ok=1; break; fi
-            if (( i % 10 == 0 )); then
-              echo "--- Keycloak logs (tail) ---"
-              docker compose logs --tail=80 keycloak || true
-            fi
-            sleep 2
-          done
-          if [ "$ok" != "1" ]; then
-            echo "Failed to get token"; exit 1
+          ACCESS_TOKEN=$(curl -sS --retry 5 --retry-connrefused --max-time 20 \
+            -d "client_id=${KC_CLIENT_ID}" \
+            -d "client_secret=${KC_CLIENT_SECRET}" \
+            -d "grant_type=client_credentials" \
+            http://localhost:8081/realms/moe/protocol/openid-connect/token | jq -r .access_token)
+          if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
+            echo "Failed to get token"; docker compose logs --tail=120 keycloak || true; exit 1
           fi
           echo "token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
 

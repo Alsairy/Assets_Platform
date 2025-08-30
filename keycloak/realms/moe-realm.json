@@ -9,20 +9,17 @@
       "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
-      "redirectUris": ["http://localhost:*/*"],
-      "webOrigins": ["*"]
-    }
-  ],
-  "users": [
+      "redirectUris": ["http://localhost:8080/*"],
+      "webOrigins": ["http://localhost:8080"]
+    },
     {
-      "username": "test.user",
+      "clientId": "assets-e2e-cli",
       "enabled": true,
-      "emailVerified": true,
-      "firstName": "Test",
-      "lastName": "User",
-      "credentials": [{ "type": "password", "value": "Passw0rd!", "temporary": false }],
-      "requiredActions": [],
-      "realmRoles": ["offline_access", "uma_authorization", "Admin"]
+      "publicClient": false,
+      "secret": "e2e-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
     }
   ],
   "roles": { "realm": [ { "name": "Admin" }, { "name": "Officer" } ] }
