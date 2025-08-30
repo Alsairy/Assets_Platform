@@ -1,19 +1,18 @@
 # Observability
 
-## Metrics
-- Request rate, latency (p50/p90/p99), error rate.
-- OCR job counters: started, succeeded, failed, low-confidence.
-- Flowable: REST 5xx, latency, task backlog.
-
-## Logs
-- Structured JSON logs with correlation IDs.
-- Sensitive data excluded.
-
-## Dashboards
-- API SLO, Worker throughput and failure rate.
-- Flowable engine health, task SLA breaches.
+## Metrics and SLOs
+- API: latency p95 < 1s, error rate < 1%
+- OCR: jobs/min, success/low-confidence/fail rates
+- Flowable: process start success, task backlog
 
 ## Alerts
-- API error rate above threshold.
-- Worker failures or backlog > N for M minutes.
-- Flowable REST unavailable.
+- 5xx spikes
+- OCR failure rate threshold
+- OCR backlog growth
+- DB CPU
+- Ingress 4xx/5xx
+
+## Dashboards
+- API latency/throughput
+- OCR pipeline
+- Workflow health

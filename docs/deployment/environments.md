@@ -1,26 +1,22 @@
 # Environments
 
-## Dev (local)
-- Docker Compose: db, keycloak, flowable, api.
-- Ports: API 8080, Keycloak 8081, Flowable 8082.
-- OIDC__AUTHORITY=http://keycloak:8080/realms/moe
+## Dev
+- Single-zone GKE
+- Cloud SQL (non-HA)
+- In-cluster Keycloak/Flowable acceptable
+- Image pinning and resource requests/limits
 
 ## Staging
-- GKE Autopilot or GKE standard.
-- Cloud SQL Postgres, external Keycloak or org IdP.
-- Google Secret Manager for secrets, Workload Identity.
-- GCS bucket for document storage, Vision API enabled.
-- Flowable: managed external or in-cluster (optional).
+- Regional GKE
+- Cloud SQL HA
+- External SSO/Flowable preferred
 
 ## Prod
-- Regional GKE, multi-zone nodes.
-- Cloud SQL with HA + PITR.
-- Private GKE nodes + Cloud NAT; WAF/Cloud Armor on Ingress.
-- HPA on API and Worker; PodDisruptionBudgets.
-- Centralized logging/metrics; SLO dashboards + alerts.
+- Regional GKE
+- Cloud SQL HA + PITR
+- External SSO
+- Hardened ingress with TLS/HSTS/WAF
 
-## Services and URLs
-- API: /health, /health/ready, /swagger
-- Worker: background processing (no service)
-- Keycloak: external (preferred) or staging-only in-cluster
-- Flowable: external (preferred) or dedicated namespace
+## Notes
+- Pin images (avoid :latest)
+- Multi-replica API and separate worker Deployment

@@ -3,12 +3,14 @@ kind: Service
 metadata:
   name: assets-api
   labels:
-    app: assets-api
+    app: assets
+    component: api
 spec:
+  type: ClusterIP
   selector:
-    app: assets-api
+    app: assets
+    component: api
   ports:
     - name: http
       port: 80
       targetPort: 8080
-  type: ClusterIP

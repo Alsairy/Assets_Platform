@@ -3,8 +3,12 @@ kind: ConfigMap
 metadata:
   name: assets-config
 data:
-  ASPNETCORE_URLS: http://+:8080
-  ASPNETCORE_ENVIRONMENT: Production
-  GoogleCloud__ProjectId: your-project-id
-  GCS__BucketName: your-bucket
-  OCR__Provider: Fake
+  OIDC__AUTHORITY: "https://idp.example.com/realms/moe"
+  OIDC__AUDIENCE: "assets-api"
+  Flowable__BaseUrl: "https://flowable.example.com/flowable-rest"
+
+  OCR__PROVIDER: "Google"
+  OCR__CONFIDENCETHRESHOLD: "0.85"
+
+  GoogleCloud__ProjectId: "your-gcp-project"
+  GCS__BucketName: "your-gcs-bucket"
