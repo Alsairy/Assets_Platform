@@ -137,14 +137,13 @@ public class GoogleVisionOcrService : IOcrService
         var extracted = Extract(anno.Text);
         var ok = conf == null || conf >= _threshold;
         return (ok, anno.Text, extracted, conf);
+    }
+
     public Task<(bool ok, string? providerOpId, string? error)> StartPdfOcrAsync(string gcsInputUri, CancellationToken ct = default)
         => Task.FromResult<(bool ok, string? providerOpId, string? error)>((true, $"op_{Guid.NewGuid():N}", (string?)null));
 
     public Task<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)> PollPdfOcrAsync(string providerOpId, CancellationToken ct = default)
         => Task.FromResult<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)>((true, true, (string?)null, 0.9, (string?)null));
-
-
-    }
 
     private static readonly Regex DocRegex = new(@"\bDOC[-\s]*([0-9]{3,})\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -222,8 +221,3 @@ public class FakeOcrService : IOcrService
     }
 
 }
-    public Task<(bool ok, string? providerOpId, string? error)> StartPdfOcrAsync(string gcsInputUri, CancellationToken ct = default)
-        => Task.FromResult<(bool ok, string? providerOpId, string? error)>((true, $"op_{Guid.NewGuid():N}", (string?)null));
-
-    public Task<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)> PollPdfOcrAsync(string providerOpId, CancellationToken ct = default)
-        => Task.FromResult<(bool done, bool success, string? outputUri, double? meanConfidence, string? error)>((true, true, (string?)null, 0.95, (string?)null));
