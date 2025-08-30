@@ -433,7 +433,7 @@ api.MapGet("/documents/{id:long}/status", async (AppDbContext db, long id) =>
         jobStatus = job?.Status,
         attempts = job?.Attempts,
         lastError = job?.LastError,
-        updatedAt = doc.UpdatedUtc
+        updatedAt = doc.UploadedUtc
     });
 });
 
