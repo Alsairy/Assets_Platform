@@ -3,9 +3,12 @@ kind: ConfigMap
 metadata:
   name: assets-config
 data:
-  OIDC_AUTHORITY: "https://keycloak.example.com/realms/moe"
-  FLOWABLE_BASEURL: "http://flowable-rest.flowable.svc.cluster.local:8080/flowable-rest"
-  OCR_PROVIDER: "Google"
-  OCR_CONFIDENCE_THRESHOLD: "0.85"
-  GOOGLE_PROJECT_ID: "your-gcp-project-id"
-  GCS_BUCKET: "assets-docs"
+  OIDC__AUTHORITY: "https://idp.example.com/realms/moe"
+  OIDC__AUDIENCE: "assets-api"
+  Flowable__BaseUrl: "https://flowable.example.com/flowable-rest"
+
+  OCR__PROVIDER: "Google"
+  OCR__CONFIDENCETHRESHOLD: "0.85"
+
+  GoogleCloud__ProjectId: "your-gcp-project"
+  GCS__BucketName: "your-gcs-bucket"

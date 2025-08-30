@@ -1,10 +1,22 @@
-# Environments and topology
+# Environments
 
-- API: ASP.NET Core (port 8080)
-- Worker: OcrJobWorker as separate Deployment
-- Keycloak: external cluster/service
-- Flowable REST: external or shared namespace
-- DB: Cloud SQL for Postgres
-- Object storage: GCS (bucket: assets-docs)
+## Dev
+- Single-zone GKE
+- Cloud SQL (non-HA)
+- In-cluster Keycloak/Flowable acceptable
+- Image pinning and resource requests/limits
 
-Config via ConfigMap; secrets via Secret or Workload Identity. Scale API with HPA on CPU/P95; Worker with queue depth or CPU.
+## Staging
+- Regional GKE
+- Cloud SQL HA
+- External SSO/Flowable preferred
+
+## Prod
+- Regional GKE
+- Cloud SQL HA + PITR
+- External SSO
+- Hardened ingress with TLS/HSTS/WAF
+
+## Notes
+- Pin images (avoid :latest)
+- Multi-replica API and separate worker Deployment

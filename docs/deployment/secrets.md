@@ -1,16 +1,10 @@
-# Secrets and configuration
-
-ConfigMap (non-sensitive):
-- OIDC_AUTHORITY
-- FLOWABLE_BASEURL
-- OCR_PROVIDER
-- OCR_CONFIDENCE_THRESHOLD
-- GOOGLE_PROJECT_ID
-- GCS_BUCKET
-
-Secret (sensitive):
-- CONNECTION_STRING
-- FLOWABLE_USERNAME
-- FLOWABLE_PASSWORD
-
-Prefer Workload Identity instead of key files for Google SDKs.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: assets-secrets
+type: Opaque
+stringData:
+  ConnectionStrings__Default: "Host=127.0.0.1;Port=5432;Database=appdb;Username=CHANGE_ME;Password=CHANGE_ME"
+  Flowable__Username: "CHANGE_ME"
+  Flowable__Password: "CHANGE_ME"
+  OIDC__CLIENTSECRET: "CHANGE_ME"

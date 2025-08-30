@@ -1,8 +1,10 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace App.Domain.Entities;
 
 public enum DataType { Text, Number, Date, Dropdown, Attachment, Location }
 public enum PrivacyLevel { Public, Confidential, Restricted }
-public enum OcrStatus { Pending, Succeeded, Failed, LowConfidence }
+public enum OcrStatus { Pending, Processing, Succeeded, LowConfidence, Failed }
 
 
 public class AssetType
@@ -110,4 +112,24 @@ public class AuditLog
     public long? EntityId { get; set; }
     public string? Details { get; set; }
     public DateTime TsUtc { get; set; } = DateTime.UtcNow;
+}
+public class OcrJob
+{
+    public long Id { get; set; }
+    public long DocumentId { get; set; }
+    public Document? Document { get; set; }
+
+    [MaxLength(200)]  public string? ProviderOpId { get; set; }
+    [MaxLength(512)]  public string? GcsInputUri { get; set; }
+    [MaxLength(512)]  public string? GcsOutputUri { get; set; }
+    public OcrStatus Status { get; set; } = OcrStatus.Pending;
+
+    [Range(0, int.MaxValue)] public int Attempts { get; set; } = 0;
+    [MaxLength(2000)] public string? LastError { get; set; }
+
+    [MaxLength(128)] public string? LeaseOwner { get; set; }
+    public DateTime? LeaseUntil { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
