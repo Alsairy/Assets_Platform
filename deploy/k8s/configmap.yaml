@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: assets-config
+data:
+  OIDC_AUTHORITY: "https://keycloak.example.com/realms/moe"
+  FLOWABLE_BASEURL: "http://flowable-rest.flowable.svc.cluster.local:8080/flowable-rest"
+  OCR_PROVIDER: "Google"
+  OCR_CONFIDENCE_THRESHOLD: "0.85"
+  GOOGLE_PROJECT_ID: "your-gcp-project-id"
+  GCS_BUCKET: "assets-docs"

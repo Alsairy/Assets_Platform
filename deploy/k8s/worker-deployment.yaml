@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: assets-ocr-worker
+  labels:
+    app: assets-ocr-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: assets-ocr-worker
+  template:
+    metadata:
+      labels:
+        app: assets-ocr-worker
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ghcr.io/alsairy/assets_platform/api:latest
+          imagePullPolicy: IfNotPresent
+          args: ["--run-worker=OcrJobWorker"]
+          env:
+            - name: ASPNETCORE_URLS
+              value: http://+:8080
+            - name: OIDC__AUTHORITY
+              valueFrom:
+                configMapKeyRef:
+                  name: assets-config
+                  key: OIDC_AUTHORITY
+            - name: FLOWABLE__BASEURL
+              valueFrom:
+                configMapKeyRef:
+                  name: assets-config
+                  key: FLOWABLE_BASEURL
+            - name: FLOWABLE__USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: assets-secrets
+                  key: FLOWABLE_USERNAME
+            - name: FLOWABLE__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: assets-secrets
+                  key: FLOWABLE_PASSWORD
+            - name: OCR__PROVIDER
+              valueFrom:
+                configMapKeyRef:
+                  name: assets-config
+                  key: OCR_PROVIDER
+            - name: OCR__CONFIDENCETHRESHOLD
+              valueFrom:
+                configMapKeyRef:
+                  name: assets-config
+                  key: OCR_CONFIDENCE_THRESHOLD
+            - name: GoogleCloud__ProjectId
+              valueFrom:
+                configMapKeyRef:
+                  name: assets-config
+                  key: GOOGLE_PROJECT_ID
+            - name: GCS__BucketName
+              valueFrom:
+                configMapKeyRef:
+                  name: assets-config
+                  key: GCS_BUCKET
+            - name: ConnectionStrings__Default
+              valueFrom:
+                secretKeyRef:
+                  name: assets-secrets
+                  key: CONNECTION_STRING
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ "ALL" ]
