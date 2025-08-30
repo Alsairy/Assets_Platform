@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: assets-config
+data:
+  OIDC__AUTHORITY: "https://idp.example.com/realms/moe"
+  OIDC__AUDIENCE: "assets-api"
+  Flowable__BaseUrl: "https://flowable.example.com/flowable-rest"
+  OCR__PROVIDER: "Google"
+  OCR__CONFIDENCETHRESHOLD: "0.85"
+  GoogleCloud__ProjectId: "your-gcp-project"
+  GCS__BucketName: "your-gcs-bucket"
