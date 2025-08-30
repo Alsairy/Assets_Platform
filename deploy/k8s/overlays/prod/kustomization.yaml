@@ -15,11 +15,6 @@ patches:
   - path: patch-deploy-api-replicas.yaml
   - path: patch-deploy-worker-replicas.yaml
   - path: patch-ingress.yaml
-images:
-  - name: ghcr.io/alsairy/assets_platform/api
-    newTag: "{{VERSION}}"
-  - name: ghcr.io/alsairy/assets_platform/worker
-    newTag: "{{VERSION}}"
 configMapGenerator:
   - name: assets-config
     behavior: merge
