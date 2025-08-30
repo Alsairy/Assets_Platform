@@ -1,0 +1,218 @@
+
+
+name: E2E Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Keycloak realm import
+        env:
+          KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+        run: |
+          mkdir -p keycloak/realms
+          cat > keycloak/realms/moe-realm.json << JSON
+          {
+            "realm": "moe",
+            "enabled": true,
+            "registrationAllowed": false,
+            "clients": [
+              {
+                "clientId": "assets-api",
+                "enabled": true,
+                "publicClient": true,
+                "standardFlowEnabled": true,
+                "directAccessGrantsEnabled": true,
+                "redirectUris": ["http://localhost:8080/*"],
+                "webOrigins": ["http://localhost:8080"]
+              },
+              {
+                "clientId": "assets-e2e-cli",
+                "enabled": true,
+                "publicClient": false,
+                "secret": "${KEYCLOAK_CLIENT_SECRET}",
+                "serviceAccountsEnabled": true,
+                "standardFlowEnabled": false,
+                "directAccessGrantsEnabled": false
+              }
+            ],
+            "roles": { "realm": [ { "name": "Admin" }, { "name": "Officer" } ] }
+          }
+          JSON
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Pull images (faster startup)
+        run: |
+          docker compose pull db keycloak flowable || true
+
+      - name: Build API
+        run: |
+          docker compose build api
+
+      - name: Start infra (db, keycloak, flowable)
+        run: |
+          set -e
+          docker compose up -d db keycloak flowable
+          echo "Waiting for Keycloak to respond..."
+          ok=0
+          for i in {1..120}; do
+            if curl -fsS http://localhost:8081/ >/dev/null; then ok=1; break; fi
+            if (( i % 20 == 0 )); then
+              echo "--- Keycloak logs (tail) ---"
+              docker compose logs --tail=50 keycloak || true
+            fi
+            sleep 2
+          done
+          if [ "$ok" != "1" ]; then
+            echo "Keycloak did not respond in time."
+            docker compose logs keycloak || true
+            exit 1
+          fi
+          echo "Waiting for Flowable engine health..."
+          ok=0
+          for i in {1..120}; do
+            if curl -fsS -u rest-admin:test http://localhost:8082/flowable-rest/service/management/engine >/dev/null; then ok=1; break; fi
+            if (( i % 20 == 0 )); then
+              echo "--- Flowable logs (tail) ---"
+              docker compose logs --tail=50 flowable || true
+            fi
+            sleep 2
+          done
+          if [ "$ok" != "1" ]; then
+            echo "Flowable did not respond in time."
+            docker compose logs flowable || true
+            exit 1
+          fi
+      - name: Grant Admin role to service account (assets-e2e-cli)
+        run: |
+          set -e
+          ADM=$(curl -sS -d "client_id=admin-cli" -d "grant_type=password" -d "username=admin" -d "password=admin" \
+            http://localhost:8081/realms/master/protocol/openid-connect/token | jq -r .access_token)
+          REALM=moe
+          CID=$(curl -sS -H "Authorization: Bearer $ADM" \
+            "http://localhost:8081/admin/realms/$REALM/clients?clientId=assets-e2e-cli" | jq -r '.[0].id')
+          SVC_UID=$(curl -sS -H "Authorization: Bearer $ADM" \
+            "http://localhost:8081/admin/realms/$REALM/clients/$CID/service-account-user" | jq -r '.id')
+          ADMIN_ROLE=$(curl -sS -H "Authorization: Bearer $ADM" \
+            "http://localhost:8081/admin/realms/$REALM/roles/Admin" | jq -c '{id:.id,name:.name}')
+          curl -sS -X POST -H "Authorization: Bearer $ADM" -H "Content-Type: application/json" \
+            -d "[$ADMIN_ROLE]" \
+            "http://localhost:8081/admin/realms/$REALM/users/$SVC_UID/role-mappings/realm" >/dev/null 2>&1 || true
+
+      - name: Start API
+        run: |
+          set -e
+          docker compose up -d api
+          echo "Waiting for API health..."
+          ok=0
+          for i in {1..120}; do
+            if curl -fsS http://localhost:8080/health >/dev/null; then ok=1; break; fi
+            if (( i % 20 == 0 )); then
+              echo "--- API logs (tail) ---"
+              docker compose logs --tail=50 api || true
+            fi
+            sleep 2
+          done
+          if [ "$ok" != "1" ]; then
+            echo "API did not become healthy in time."
+            docker compose ps || true
+            docker compose logs db || true
+            docker compose logs api || true
+            exit 1
+          fi
+
+      - name: Wait for OIDC discovery
+        run: |
+          ok=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8081/realms/moe/.well-known/openid-configuration >/dev/null; then ok=1; break; fi
+            if (( i % 10 == 0 )); then docker compose logs --tail=80 keycloak || true; fi
+            sleep 2
+          done
+          if [ "$ok" != "1" ]; then echo "OIDC discovery not ready"; exit 1; fi
+
+      - name: Fetch JWT (client_credentials)
+        id: token
+        env:
+          KC_CLIENT_ID: assets-e2e-cli
+          KC_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+        run: |
+          ACCESS_TOKEN=$(curl -sS --retry 5 --retry-connrefused --max-time 20 \
+            -d "client_id=${KC_CLIENT_ID}" \
+            -d "client_secret=${KC_CLIENT_SECRET}" \
+            -d "grant_type=client_credentials" \
+            http://localhost:8081/realms/moe/protocol/openid-connect/token | jq -r .access_token)
+          if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
+            echo "Failed to get token"; docker compose logs --tail=120 keycloak || true; exit 1
+          fi
+          echo "token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Create asset (expect 201)
+        id: create
+        run: |
+          STATUS=$(curl -sw "%{http_code}" -o /tmp/asset.json \
+            -H "Authorization: Bearer ${{ steps.token.outputs.token }}" \
+            -H "Content-Type: application/json" \
+            -d '{"assetTypeId":1,"name":"E2E Asset","region":"Riyadh","city":"Riyadh"}' \
+            http://localhost:8080/api/assets)
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          cat /tmp/asset.json || true
+
+      - name: Extract asset id
+        id: asset
+        run: |
+          ASSET_ID=$(jq -r '.id // .Id // .assetId // .AssetId // empty' /tmp/asset.json)
+          echo "asset_id=$ASSET_ID" >> $GITHUB_OUTPUT
+
+      - name: Read workflow instance
+        id: wf
+        run: |
+          WF_STATUS="NA"
+          if [ -n "${{ steps.asset.outputs.asset_id }}" ]; then
+            WF_STATUS=$(curl -sS -w "%{http_code}" -H "Authorization: Bearer ${{ steps.token.outputs.token }}" \
+              -o /tmp/workflow.json \
+              http://localhost:8080/api/workflows/asset/${{ steps.asset.outputs.asset_id }})
+          else
+            echo '{}' > /tmp/workflow.json
+          fi
+          echo "status=$WF_STATUS" >> "$GITHUB_OUTPUT"
+          cat /tmp/workflow.json || true
+
+      - name: Prepare 4-line report
+        run: |
+          {
+            echo "API health: $(curl -fsS http://localhost:8080/health || echo FAIL)"
+            echo "Create asset status: ${{ steps.create.outputs.status }} (assetId=${{ steps.asset.outputs.asset_id }})"
+            echo "Workflow read HTTP: ${{ steps.wf.outputs.status }}"
+            echo "OCR quick check: skipped (image/PDF upload not run in CI)"
+          } | tee e2e-report.txt
+
+      - name: Upload report and artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-smoke-artifacts
+          path: |
+            e2e-report.txt
+            /tmp/asset.json
+            /tmp/workflow.json

@@ -1,0 +1,26 @@
+{
+  "realm": "moe",
+  "enabled": true,
+  "registrationAllowed": false,
+  "clients": [
+    {
+      "clientId": "assets-api",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:8080/*"],
+      "webOrigins": ["http://localhost:8080"]
+    },
+    {
+      "clientId": "assets-e2e-cli",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "e2e-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    }
+  ],
+  "roles": { "realm": [ { "name": "Admin" }, { "name": "Officer" } ] }
+}

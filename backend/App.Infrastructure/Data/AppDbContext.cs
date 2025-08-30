@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<WorkflowInstance> WorkflowInstances => Set<WorkflowInstance>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<FieldPermission> FieldPermissions => Set<FieldPermission>();
+    public DbSet<OcrJob> OcrJobs => Set<OcrJob>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -55,6 +56,20 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Document>()
             .HasIndex(d => d.AssetId);
+
+        modelBuilder.Entity<Document>()
+            .Property(d => d.OcrStatus)
+            .HasConversion<string>();
+
+        modelBuilder.Entity<OcrJob>().ToTable("ocr_jobs");
+        modelBuilder.Entity<OcrJob>()
+            .HasOne(j => j.Document)
+            .WithMany()
+            .HasForeignKey(j => j.DocumentId);
+        modelBuilder.Entity<OcrJob>()
+            .HasIndex(j => new { j.DocumentId, j.Status });
+        modelBuilder.Entity<OcrJob>()
+            .HasIndex(j => j.ProviderOpId);
 
         modelBuilder.Entity<Role>().HasData(
             new Role { Id = 1, Name = "Admin" },
