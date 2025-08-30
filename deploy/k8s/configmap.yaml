@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: assets-config
+data:
+  ASPNETCORE_URLS: http://+:8080
+  ASPNETCORE_ENVIRONMENT: Production
+  GoogleCloud__ProjectId: your-project-id
+  GCS__BucketName: your-bucket
+  OCR__Provider: Fake

@@ -1,125 +1,73 @@
-using App.Domain.Entities;
 using App.Infrastructure.Data;
-using App.Infrastructure.Services;
+using App.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 public class OcrJobWorker : BackgroundService
 {
     private readonly IServiceProvider _sp;
-    private readonly ILogger<OcrJobWorker> _logger;
-    private readonly TimeSpan _poll = TimeSpan.FromSeconds(5);
-    private readonly string _leaseOwner = $"{Environment.MachineName}:{Guid.NewGuid():N}";
+    private readonly ILogger<OcrJobWorker> _log;
+    private readonly TimeSpan _interval = TimeSpan.FromSeconds(2);
+    private readonly string _workerId = Environment.MachineName + ":" + Guid.NewGuid().ToString("N");
 
-    public OcrJobWorker(IServiceProvider sp, ILogger<OcrJobWorker> logger)
-    {
-        _sp = sp;
-        _logger = logger;
-    }
+    public OcrJobWorker(IServiceProvider sp, ILogger<OcrJobWorker> log) { _sp = sp; _log = log; }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("OcrJobWorker starting with lease owner {owner}", _leaseOwner);
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 using var scope = _sp.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var ocr = scope.ServiceProvider.GetRequiredService<IOcrService>();
-                var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
-
                 var now = DateTime.UtcNow;
-                var leaseFor = now.AddSeconds(30);
 
+                var candidateId = await db.OcrJobs
+                    .Where(j => (j.Status == OcrStatus.Pending || j.Status == OcrStatus.Processing) &&
+                                (j.LeaseUntil == null || j.LeaseUntil < now))
+                    .OrderBy(j => j.Id)
+                    .Select(j => j.Id)
+                    .FirstOrDefaultAsync(stoppingToken);
+                if (candidateId == 0)
+                {
+                    await Task.Delay(_interval, stoppingToken);
+                    continue;
+                }
+
+                var leaseUntil = now.AddMinutes(2);
                 var claimed = await db.OcrJobs
-                    .Where(j => (j.Status == "Queued" || j.Status == "Processing") &&
-                                (j.LeaseUntil == null || j.LeaseUntil < now))
-                    .OrderBy(j => j.UpdatedAt)
-                    .Take(1)
-                    .ToListAsync(stoppingToken);
-
-                if (claimed.Count == 0)
-                {
-                    await Task.Delay(_poll, stoppingToken);
-                    continue;
-                }
-
-                var job = claimed[0];
-                var updated = await db.OcrJobs
-                    .Where(j => j.Id == job.Id &&
-                                (j.LeaseUntil == null || j.LeaseUntil < now))
+                    .Where(j => j.Id == candidateId && (j.LeaseUntil == null || j.LeaseUntil < now))
                     .ExecuteUpdateAsync(s => s
-                        .SetProperty(p => p.LeaseOwner, _leaseOwner)
-                        .SetProperty(p => p.LeaseUntil, leaseFor)
-                        .SetProperty(p => p.UpdatedAt, DateTime.UtcNow),
-                        stoppingToken);
+                        .SetProperty(j => j.LeaseOwner, _workerId)
+                        .SetProperty(j => j.LeaseUntil, leaseUntil)
+                        .SetProperty(j => j.UpdatedAt, now), stoppingToken);
 
-                if (updated == 0)
+                if (claimed == 0) continue;
+
+                var job = await db.OcrJobs.FirstAsync(j => j.Id == candidateId, stoppingToken);
+
+                if (job.Status == OcrStatus.Pending)
                 {
-                    continue;
-                }
-
-                job = await db.OcrJobs.Include(j => j.Document).FirstAsync(j => j.Id == job.Id, stoppingToken);
-
-                if (job.Status == "Queued" && string.IsNullOrWhiteSpace(job.ProviderOpId))
-                {
+                    job.Status = OcrStatus.Processing;
                     job.Attempts += 1;
-                    var bucket = cfg["GCS:BucketName"] ?? "assets-dev";
-                    var input = job.GcsInputUri ?? $"gs://{bucket}/{job.Document!.StoragePath}";
-                    var (ok, providerId, err) = await ocr.StartPdfOcrAsync(input, stoppingToken);
-                    if (!ok || string.IsNullOrWhiteSpace(providerId))
-                    {
-                        job.LastError = err ?? "failed to start";
-                        job.Status = "Failed";
-                    }
-                    else
-                    {
-                        job.ProviderOpId = providerId;
-                        job.Status = "Processing";
-                        job.LastError = null;
-                    }
                     job.UpdatedAt = DateTime.UtcNow;
                     await db.SaveChangesAsync(stoppingToken);
-                    continue;
+
+                    var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == job.DocumentId, stoppingToken);
+                    if (doc != null && doc.OcrStatus != OcrStatus.Processing)
+                    {
+                        doc.OcrStatus = OcrStatus.Processing;
+                        await db.SaveChangesAsync(stoppingToken);
+                    }
                 }
-
-                if (job.Status == "Processing" && !string.IsNullOrWhiteSpace(job.ProviderOpId))
+                else
                 {
-                    var (done, success, outputUri, meanConf, err) = await ocr.PollPdfOcrAsync(job.ProviderOpId!, stoppingToken);
-                    if (!done)
-                    {
-                        continue;
-                    }
-
-                    var threshold = cfg.GetValue<double?>("OCR:ConfidenceThreshold") ?? 0.85;
-                    var doc = await db.Documents.FirstAsync(d => d.Id == job.DocumentId, stoppingToken);
-
-                    if (success)
-                    {
-                        job.Status = meanConf.HasValue && meanConf.Value < threshold ? "LowConfidence" : "Succeeded";
-                        doc.OcrStatus = job.Status == "LowConfidence" ? OcrStatus.LowConfidence : OcrStatus.Succeeded;
-                        doc.OcrConfidence = meanConf;
-                        job.GcsOutputUri = outputUri;
-                        job.LastError = null;
-                    }
-                    else
-                    {
-                        job.Status = "Failed";
-                        doc.OcrStatus = OcrStatus.Failed;
-                        job.LastError = err ?? "ocr failed";
-                    }
-
-                    job.LeaseOwner = null;
-                    job.LeaseUntil = null;
-                    job.UpdatedAt = DateTime.UtcNow;
-                    await db.SaveChangesAsync(stoppingToken);
-                    continue;
+                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
                 }
             }
-            catch (TaskCanceledException) { }
+            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Worker loop error");
+                _log.LogError(ex, "OcrJobWorker loop error");
                 await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
             }
         }
