@@ -111,3 +111,20 @@ public class AuditLog
     public string? Details { get; set; }
     public DateTime TsUtc { get; set; } = DateTime.UtcNow;
 }
+
+public class OcrJob
+{
+    public long Id { get; set; }
+    public long DocumentId { get; set; }
+    public Document? Document { get; set; }
+    public string Status { get; set; } = "Queued";
+    public int Attempts { get; set; } = 0;
+    public string? LastError { get; set; }
+    public string? ProviderOpId { get; set; }
+    public string? GcsInputUri { get; set; }
+    public string? GcsOutputUri { get; set; }
+    public string? LeaseOwner { get; set; }
+    public DateTime? LeaseUntil { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
