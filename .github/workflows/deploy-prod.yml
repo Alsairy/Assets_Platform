@@ -1,0 +1,81 @@
+name: Deploy to Prod (GKE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Image/manifest VERSION (commit SHA) promoted from staging"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  VERSION: ${{ github.event.inputs.sha }}
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER }}
+  WIF_SA_EMAIL: ${{ secrets.GCP_WIF_SA_EMAIL }}
+  GKE_CLUSTER: ${{ secrets.GKE_PROD_CLUSTER }}
+  GKE_LOCATION: ${{ secrets.GKE_PROD_LOCATION }}
+  NAMESPACE: assets-prod
+
+jobs:
+  deploy:
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools (kustomize + kubectl + gcloud)
+        run: |
+          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/latest/download/kustomize_linux_amd64.tar.gz" | tar -xz
+          sudo mv kustomize /usr/local/bin/
+          sudo apt-get update && sudo apt-get install -y google-cloud-cli
+
+      - name: Authenticate to GCP via Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SA_EMAIL }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_LOCATION }}
+
+      - name: Render manifests (prod overlay) with VERSION
+        run: |
+          sed -i "s/{{VERSION}}/${VERSION}/g" deploy/k8s/base/kustomization.yaml
+          kustomize build deploy/k8s/overlays/prod > manifests-prod.yaml
+          git checkout -- deploy/k8s/base/kustomization.yaml
+
+      - name: Validate manifests with kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar -xz
+          sudo mv kubeconform /usr/local/bin/
+          kubeconform -strict -summary manifests-prod.yaml
+
+      - name: Diff
+        run: |
+          kubectl diff -n $NAMESPACE -f manifests-prod.yaml || true
+
+      - name: Apply (server-side & prune by label)
+        run: |
+          kubectl get ns $NAMESPACE >/dev/null 2>&1 || kubectl create ns $NAMESPACE
+          kubectl apply --server-side -n $NAMESPACE --prune -l app=assets -f manifests-prod.yaml
+
+      - name: Rollout checks
+        run: |
+          kubectl rollout status deploy -n $NAMESPACE -l app=assets --timeout=180s
+          kubectl wait --for=condition=Available deploy -n $NAMESPACE -l app=assets --timeout=120s
+
+      - name: Upload manifests artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifests-prod
+          path: manifests-prod.yaml
